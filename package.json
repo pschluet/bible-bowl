@@ -10,7 +10,8 @@
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\" --ignore-path .prettierignore",
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\" --ignore-path .prettierignore",
     "seed:admin": "tsx scripts/seed-admin.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sandbox": "NODE_OPTIONS=--no-experimental-webstorage npx ampx sandbox"
   },
   "dependencies": {
     "@aws-amplify/adapter-nextjs": "^1.7.3",

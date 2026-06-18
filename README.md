@@ -33,8 +33,10 @@ The app serves three audiences:
 2. In one terminal, start the Amplify sandbox. This provisions a personal Cognito user pool, DynamoDB tables, and an AppSync API in your AWS account, then writes `amplify_outputs.json` automatically:
 
    ```bash
-   npx ampx sandbox
+   npm run sandbox
    ```
+
+   > **Node.js v22+ note:** The `sandbox` script passes `--no-experimental-webstorage` to Node to work around a compatibility issue between Node's experimental Web Storage API and the `@typescript/vfs` package used internally by `ampx`. If you're on Node 18 or 20 you can run `npx ampx sandbox` directly instead.
 
    Leave this running — it watches `amplify/` for changes and redeploys.
 
@@ -96,6 +98,7 @@ After the sandbox is running (or after your first deploy), create an admin and s
 
 ## Scripts
 
+- `npm run sandbox` — start the Amplify sandbox (Node v22+ compatible)
 - `npm run dev` — start the dev server
 - `npm run build` — production build
 - `npm run lint` — ESLint

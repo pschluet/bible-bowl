@@ -3,16 +3,11 @@
 import { Amplify } from 'aws-amplify';
 import outputs from '@/amplify_outputs.json';
 
-// `Amplify.configure()` must run in browser context only.
-// Server-side Amplify operations use `createServerRunner` (app/lib/amplify-server.ts)
-// independently — they do NOT depend on this call.
-// Guarding here prevents the configure from running during Next.js
-// static pre-render (which uses Node.js, not a browser) and avoids
-// "Cannot convert undefined or null to object" errors from the Amplify
-// SDK when initialized with stub/example outputs during CI builds.
-if (typeof window !== 'undefined') {
-  Amplify.configure(outputs, { ssr: true });
-}
+// Configure runs at module-eval time on both server (SSR) and client so that
+// `generateClient()` calls in page modules never see an unconfigured singleton.
+// Server-side Amplify operations still use `createServerRunner` (amplify-server.ts)
+// independently; this call does not conflict with it.
+Amplify.configure(outputs, { ssr: true });
 
 export default function ConfigureAmplify() {
   return null;

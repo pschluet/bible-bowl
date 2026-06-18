@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
+import { fetchAuthSession } from 'aws-amplify/auth';
 import type { Schema } from '@/amplify/data/resource';
 import { GAME_STATE_ID } from '@/app/lib/constants';
 import Leaderboard, { type LeaderboardTeam } from '@/app/components/Leaderboard';
@@ -33,10 +34,15 @@ export default function ViewerPage() {
   }, []);
 
   const fetchData = useCallback(async () => {
+    // allow.guest() compiles to identityPool IAM; allow.authenticated() compiles to
+    // Cognito user-pools "private". Pick the right mode so both states get through.
+    const session = await fetchAuthSession({ forceRefresh: false }).catch(() => null);
+    const authMode = session?.tokens?.accessToken ? 'userPool' : 'iam';
+
     const [teamsRes, scoresRes, gameStateRes] = await Promise.all([
-      client.models.Team.list(),
-      client.models.Score.list(),
-      client.models.GameState.get({ id: GAME_STATE_ID }),
+      client.models.Team.list({ authMode }),
+      client.models.Score.list({ authMode }),
+      client.models.GameState.get({ id: GAME_STATE_ID }, { authMode }),
     ]);
 
     const totals = new Map<string, number>();

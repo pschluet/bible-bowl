@@ -1,0 +1,8 @@
+node_modules
+.next
+amplify_outputs.json
+amplify_outputs.json.example
+amplify/.amplify
+.amplify
+next-env.d.ts
+package-lock.json
