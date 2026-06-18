@@ -21,9 +21,9 @@ const backend = defineBackend({ auth, data });
  */
 const adminStack = backend.createStack('BibleBowlAdminStack');
 
-const cognitoAdminUser = new iam.User(adminStack, 'CognitoAdminUser', {
-  userName: 'bible-bowl-cognito-admin',
-});
+// No explicit userName — CDK generates one from the stack name (which includes
+// the Amplify app ID and branch), so sandbox and production don't collide.
+const cognitoAdminUser = new iam.User(adminStack, 'CognitoAdminUser');
 
 cognitoAdminUser.addToPrincipalPolicy(
   new iam.PolicyStatement({
