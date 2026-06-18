@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '@/amplify/data/resource';
+import { compareTeamOrder } from '@/app/lib/constants';
 
 type Team = Schema['Team']['type'];
 
@@ -22,7 +23,7 @@ export default function AdminTeamsPage() {
   const load = useCallback(async () => {
     try {
       const res = await client.models.Team.list();
-      setTeams([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
+      setTeams([...res.data].sort(compareTeamOrder));
       setError(null);
     } catch {
       setError('Failed to load teams.');
@@ -91,6 +92,38 @@ export default function AdminTeamsPage() {
     }
   }
 
+  async function handleMove(index: number, direction: 'up' | 'down') {
+    const swapIndex = direction === 'up' ? index - 1 : index + 1;
+    if (swapIndex < 0 || swapIndex >= teams.length) return;
+    setError(null);
+
+    // Build the new order by swapping the two teams
+    const reordered = [...teams];
+    [reordered[index], reordered[swapIndex]] = [reordered[swapIndex], reordered[index]];
+
+    // Optimistically update UI before the writes complete
+    setTeams(reordered);
+
+    try {
+      // Persist dense sequential displayOrder values for only the two swapped rows
+      await Promise.all([
+        client.models.Team.update(
+          { id: reordered[index].id, displayOrder: index },
+          { authMode: 'userPool' }
+        ),
+        client.models.Team.update(
+          { id: reordered[swapIndex].id, displayOrder: swapIndex },
+          { authMode: 'userPool' }
+        ),
+      ]);
+      // Full reload normalises any remaining null displayOrders
+      await load();
+    } catch {
+      setError('Failed to reorder teams.');
+      await load(); // restore on failure
+    }
+  }
+
   return (
     <div className="mx-auto max-w-3xl">
       <h1 className="mb-6 text-2xl font-bold text-gray-900">Teams</h1>
@@ -130,8 +163,30 @@ export default function AdminTeamsPage() {
         </div>
       ) : (
         <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
-          {teams.map((team) => (
+          {teams.map((team, index) => (
             <li key={team.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+              {/* Up/down reorder buttons */}
+              <div className="flex flex-col">
+                <button
+                  type="button"
+                  onClick={() => void handleMove(index, 'up')}
+                  disabled={index === 0}
+                  className="text-gray-400 hover:text-gray-700 disabled:invisible"
+                  aria-label="Move up"
+                >
+                  ▲
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleMove(index, 'down')}
+                  disabled={index === teams.length - 1}
+                  className="text-gray-400 hover:text-gray-700 disabled:invisible"
+                  aria-label="Move down"
+                >
+                  ▼
+                </button>
+              </div>
+
               <div className="min-w-0 flex-1">
                 {editingId === team.id ? (
                   <input

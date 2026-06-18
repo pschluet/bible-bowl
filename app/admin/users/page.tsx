@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '@/amplify/data/resource';
+import { compareTeamOrder } from '@/app/lib/constants';
 
 type Team = Schema['Team']['type'];
 type Role = 'Admins' | 'Scorekeepers';
@@ -40,7 +41,7 @@ export default function AdminUsersPage() {
   const loadTeams = useCallback(async () => {
     try {
       const res = await client.models.Team.list();
-      setTeams([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
+      setTeams([...res.data].sort(compareTeamOrder));
     } catch {
       setError('Failed to load teams.');
     }

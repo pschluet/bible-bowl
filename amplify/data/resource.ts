@@ -34,6 +34,7 @@ const schema = a.schema({
       name: a.string().required(),
       scorekeeperUserId: a.string(),
       scorekeeperEmail: a.string(),
+      displayOrder: a.integer(),
     })
     .authorization((allow) => [
       allow.guest().to(['read']),

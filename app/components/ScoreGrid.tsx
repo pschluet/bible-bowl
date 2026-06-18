@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { Schema } from '@/amplify/data/resource';
+import { compareTeamOrder } from '@/app/lib/constants';
 
 type Team = Schema['Team']['type'];
 type Score = Schema['Score']['type'];
@@ -42,7 +43,7 @@ export default function ScoreGrid({
     byQuestion.set(score.questionNumber, score);
   }
 
-  const sortedTeams = [...teams].sort((a, b) => a.name.localeCompare(b.name));
+  const sortedTeams = [...teams].sort(compareTeamOrder);
   const questionCount = currentQuestion ?? 0;
   const questionNumbers = Array.from({ length: questionCount }, (_, i) => i + 1);
 
