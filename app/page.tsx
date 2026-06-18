@@ -5,6 +5,7 @@ import { generateClient } from 'aws-amplify/data';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import type { Schema } from '@/amplify/data/resource';
 import { GAME_STATE_ID } from '@/app/lib/constants';
+import Link from 'next/link';
 import Leaderboard, { type LeaderboardTeam, type ScoreHistoryEntry } from '@/app/components/Leaderboard';
 
 const FAVORITE_KEY = 'bb_favorite';
@@ -17,6 +18,7 @@ export default function ViewerPage() {
   const [currentQuestion, setCurrentQuestion] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [favoriteTeamId, setFavoriteTeamId] = useState<string | null>(null);
+  const [groups, setGroups] = useState<string[]>([]);
 
   useEffect(() => {
     // localStorage is unavailable during SSR, so read it after mount.
@@ -38,6 +40,9 @@ export default function ViewerPage() {
     // Cognito user-pools "private". Pick the right mode so both states get through.
     const session = await fetchAuthSession({ forceRefresh: false }).catch(() => null);
     const authMode = session?.tokens?.accessToken ? 'userPool' : 'iam';
+    setGroups(
+      (session?.tokens?.accessToken?.payload['cognito:groups'] as string[] | undefined) ?? []
+    );
 
     const [teamsRes, scoresRes, gameStateRes] = await Promise.all([
       client.models.Team.list({ authMode }),
@@ -78,6 +83,9 @@ export default function ViewerPage() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
+  const isAdmin = groups.includes('Admins');
+  const isScorekeeper = groups.includes('Scorekeepers');
+
   return (
     <main className="flex min-h-full flex-col">
       <header className="border-b border-gray-200 bg-white px-4 py-4 text-center">
@@ -85,6 +93,26 @@ export default function ViewerPage() {
         <p className="mt-1 text-sm text-gray-500">
           {currentQuestion === null ? 'Waiting to start' : `Question ${currentQuestion}`}
         </p>
+        {(isAdmin || isScorekeeper) && (
+          <nav className="mt-2 flex justify-center gap-4">
+            {isAdmin && (
+              <Link
+                href="/admin/scores"
+                className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+              >
+                Admin
+              </Link>
+            )}
+            {isScorekeeper && (
+              <Link
+                href="/scorekeeper"
+                className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+              >
+                Scorekeeper
+              </Link>
+            )}
+          </nav>
+        )}
       </header>
       <Leaderboard
         teams={teams}
