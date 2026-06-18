@@ -32,6 +32,8 @@ cognitoAdminUser.addToPrincipalPolicy(
     actions: [
       'cognito-idp:AdminCreateUser',
       'cognito-idp:AdminAddUserToGroup',
+      'cognito-idp:AdminRemoveUserFromGroup',
+      'cognito-idp:AdminListGroupsForUser',
       'cognito-idp:AdminSetUserPassword',
       'cognito-idp:AdminGetUser',
       'cognito-idp:ListUsers',
