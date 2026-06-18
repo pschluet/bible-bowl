@@ -72,9 +72,9 @@ function TeamRow({
           type="button"
           aria-expanded={isExpanded}
           onClick={() => onToggle(team.id)}
-          className="flex flex-1 items-center gap-2 text-left"
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
-          <span className="flex-1 truncate font-medium text-gray-900">{team.name}</span>
+          <span className="min-w-0 flex-1 break-words line-clamp-2 font-medium text-gray-900">{team.name}</span>
           <LatestBadge history={team.history} />
           <span className="text-2xl font-bold tabular-nums text-gray-900">{team.total}</span>
           <span
@@ -251,7 +251,7 @@ export default function Leaderboard({
                     {rankLabel(rank)}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-semibold text-gray-900">
+                    <span className="block break-words line-clamp-2 font-semibold text-gray-900">
                       {team.name}
                     </span>
                     <span className="flex items-center gap-1.5 mt-0.5">
