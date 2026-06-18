@@ -13,6 +13,8 @@ import { getServerSession } from '@/app/lib/auth';
 type Role = 'Admins' | 'Scorekeepers';
 
 export async function POST(request: Request) {
+  console.log('[users route] COGNITO_ADMIN_ACCESS_KEY_ID present:', !!process.env.COGNITO_ADMIN_ACCESS_KEY_ID);
+  console.log('[users route] COGNITO_ADMIN_SECRET_ACCESS_KEY present:', !!process.env.COGNITO_ADMIN_SECRET_ACCESS_KEY);
   const session = await getServerSession();
   if (!session?.isAdmin) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
