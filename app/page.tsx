@@ -78,9 +78,18 @@ export default function ViewerPage() {
       client.models.GameState.get({ id: GAME_STATE_ID }, { authMode }),
     ]);
 
+    // De-dupe: keep only the latest record per (teamId, questionNumber) by updatedAt.
+    // This guards against duplicate Score records that may exist from prior bugs.
+    const latestByCell = new Map<string, (typeof scoresRes.data)[number]>();
+    for (const s of scoresRes.data) {
+      const k = `${s.teamId}#${s.questionNumber}`;
+      const prev = latestByCell.get(k);
+      if (!prev || (s.updatedAt ?? '') > (prev.updatedAt ?? '')) latestByCell.set(k, s);
+    }
+
     const totals = new Map<string, number>();
     const historyByTeam = new Map<string, ScoreHistoryEntry[]>();
-    for (const score of scoresRes.data) {
+    for (const score of latestByCell.values()) {
       totals.set(score.teamId, (totals.get(score.teamId) ?? 0) + (score.points ?? 0));
       const arr = historyByTeam.get(score.teamId) ?? [];
       arr.push({ questionNumber: score.questionNumber, points: score.points ?? 0 });

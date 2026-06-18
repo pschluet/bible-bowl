@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '@/amplify/data/resource';
 import GroupPill from '@/app/components/GroupPill';
+import { scoreId as makeScoreId } from '@/app/lib/constants';
 
 type Team = Schema['Team']['type'];
 
@@ -34,13 +35,18 @@ export default function ScoreEntry({
     setSubmitting(true);
     setError(null);
     try {
+      // Use a deterministic id so concurrent submits can't create duplicate records.
       const { errors } = await client.models.Score.create({
+        id: makeScoreId(team.id, currentQuestion),
         teamId: team.id,
         questionNumber: currentQuestion,
         points,
       });
       if (errors && errors.length > 0) {
-        setError('Could not submit score. Please try again.');
+        // A record already exists for this question (e.g. admin already scored it,
+        // or a duplicate submit race). Treat it as already-scored rather than creating
+        // a second record.
+        setError('This question has already been scored.');
       } else {
         setSubmittedScore(points);
       }

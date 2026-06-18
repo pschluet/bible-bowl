@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '@/amplify/data/resource';
-import { GAME_STATE_ID, compareTeamOrder } from '@/app/lib/constants';
+import { GAME_STATE_ID, compareTeamOrder, scoreId } from '@/app/lib/constants';
 import ScoreGrid from '@/app/components/ScoreGrid';
 import QuickEntryDrawer from '@/app/components/QuickEntryDrawer';
 
@@ -33,6 +33,8 @@ export default function AdminScoresPage() {
   const sortedTeams = useMemo(() => [...teams].sort(compareTeamOrder), [teams]);
 
   // Score lookup: teamId → (questionNumber → Score)
+  // When duplicate records exist for the same (teamId, questionNumber), keep the
+  // one with the latest updatedAt so the displayed value is deterministic.
   const scoreMap = useMemo(() => {
     const map = new Map<string, Map<number, Score>>();
     for (const score of scores) {
@@ -41,7 +43,10 @@ export default function AdminScoresPage() {
         byQuestion = new Map<number, Score>();
         map.set(score.teamId, byQuestion);
       }
-      byQuestion.set(score.questionNumber, score);
+      const existing = byQuestion.get(score.questionNumber);
+      if (!existing || (score.updatedAt ?? '') > (existing.updatedAt ?? '')) {
+        byQuestion.set(score.questionNumber, score);
+      }
     }
     return map;
   }, [scores]);
@@ -168,17 +173,39 @@ export default function AdminScoresPage() {
     }
   }
 
-  const handleScoreChange = useCallback(
-    async (teamId: string, questionNumber: number, points: number, existingId: string | null) => {
+  // Upsert: read-before-write by (teamId, questionNumber) to prevent duplicates.
+  // Also heals any pre-existing duplicate records for the same cell.
+  const saveScore = useCallback(
+    async (teamId: string, questionNumber: number, points: number) => {
       setError(null);
       try {
-        if (existingId) {
-          await client.models.Score.update({ id: existingId, points }, { authMode: 'userPool' });
-        } else {
-          await client.models.Score.create(
-            { teamId, questionNumber, points },
+        const { data: existing } = await client.models.Score.list({
+          filter: { teamId: { eq: teamId }, questionNumber: { eq: questionNumber } },
+          authMode: 'userPool',
+        });
+        if (existing.length > 0) {
+          await client.models.Score.update(
+            { id: existing[0].id, points },
             { authMode: 'userPool' }
           );
+          // Delete any extras to heal pre-existing duplicates
+          await Promise.all(
+            existing.slice(1).map((s) =>
+              client.models.Score.delete({ id: s.id }, { authMode: 'userPool' })
+            )
+          );
+        } else {
+          const { errors } = await client.models.Score.create(
+            { id: scoreId(teamId, questionNumber), teamId, questionNumber, points },
+            { authMode: 'userPool' }
+          );
+          if (errors?.length) {
+            // Lost a concurrent create race — record exists now; update it
+            await client.models.Score.update(
+              { id: scoreId(teamId, questionNumber), points },
+              { authMode: 'userPool' }
+            );
+          }
         }
         await load();
       } catch {
@@ -193,8 +220,7 @@ export default function AdminScoresPage() {
   const enterScoreAndAdvance = useCallback(
     (teamId: string, points: number) => {
       if (currentQuestion === null) return;
-      const existing = scoreMap.get(teamId)?.get(currentQuestion) ?? null;
-      void handleScoreChange(teamId, currentQuestion, points, existing?.id ?? null);
+      void saveScore(teamId, currentQuestion, points);
       // Flash confirmation for ~450 ms before advancing
       setRecentEntry({ teamId, points });
       if (advanceTimerRef.current !== null) clearTimeout(advanceTimerRef.current);
@@ -204,7 +230,7 @@ export default function AdminScoresPage() {
         advanceTimerRef.current = null;
       }, 450);
     },
-    [currentQuestion, scoreMap, handleScoreChange, selectNext]
+    [currentQuestion, saveScore, selectNext]
   );
 
   const handleScoreDelete = useCallback(
@@ -275,7 +301,7 @@ export default function AdminScoresPage() {
           teams={sortedTeams}
           scoreMap={scoreMap}
           currentQuestion={currentQuestion}
-          onScoreChange={handleScoreChange}
+          onScoreChange={saveScore}
           onScoreDelete={handleScoreDelete}
           selectedTeamId={selectedTeamId}
           onSelect={selectTeam}

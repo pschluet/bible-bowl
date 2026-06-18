@@ -22,6 +22,14 @@ export const GROUP_LABELS: Record<GroupType, string> = {
 };
 
 /**
+ * Deterministic primary-key helper for Score records.
+ * Using a content-derived id makes concurrent creates for the same
+ * (teamId, questionNumber) fail atomically — no duplicate records possible.
+ */
+export const scoreId = (teamId: string, questionNumber: number) =>
+  `${teamId}#${questionNumber}`;
+
+/**
  * Comparator for sorting teams by admin-assigned display order.
  * Teams without an explicit order (null/undefined) sort after those with one,
  * with alphabetical name as the tiebreaker.

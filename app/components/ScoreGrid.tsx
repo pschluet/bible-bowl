@@ -12,12 +12,7 @@ interface ScoreGridProps {
   teams: Team[]; // already sorted
   scoreMap: Map<string, Map<number, Score>>;
   currentQuestion: number | null;
-  onScoreChange: (
-    teamId: string,
-    questionNumber: number,
-    points: number,
-    existingId: string | null
-  ) => void;
+  onScoreChange: (teamId: string, questionNumber: number, points: number) => void;
   onScoreDelete?: (existingId: string) => void;
   selectedTeamId: string | null;
   onSelect: (id: string) => void;
@@ -67,13 +62,8 @@ export default function ScoreGrid({
     return total;
   }
 
-  function handleSelect(
-    teamId: string,
-    questionNumber: number,
-    points: number,
-    existingId: string | null
-  ) {
-    onScoreChange(teamId, questionNumber, points, existingId);
+  function handleSelect(teamId: string, questionNumber: number, points: number) {
+    onScoreChange(teamId, questionNumber, points);
     setEditing(null);
   }
 
@@ -182,9 +172,7 @@ export default function ScoreGrid({
                               key={pts}
                               type="button"
                               tabIndex={-1}
-                              onClick={() =>
-                                handleSelect(team.id, q, pts, existing ? existing.id : null)
-                              }
+                              onClick={() => handleSelect(team.id, q, pts)}
                               className="h-7 w-7 rounded bg-indigo-600 text-xs font-semibold text-white hover:bg-indigo-700"
                             >
                               {pts}
