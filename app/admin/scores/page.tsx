@@ -77,6 +77,40 @@ export default function AdminScoresPage() {
     }
   }
 
+  async function handleReset() {
+    if (
+      !confirm(
+        'Reset all scores and questions?\n\nEvery score will be permanently deleted and the game will return to "not started". Teams are kept.\n\nThis cannot be undone.'
+      )
+    )
+      return;
+    setBusy(true);
+    setError(null);
+    try {
+      // Amplify has no bulk delete — list all pages then delete each Score.
+      let nextToken: string | null | undefined;
+      do {
+        const page = await client.models.Score.list(
+          nextToken ? { nextToken } : undefined
+        );
+        await Promise.all(
+          page.data.map((s) => client.models.Score.delete({ id: s.id }, { authMode: 'userPool' }))
+        );
+        nextToken = page.nextToken;
+      } while (nextToken);
+
+      // Delete the GameState singleton → returns to "not started".
+      if (currentQuestion !== null) {
+        await client.models.GameState.delete({ id: GAME_STATE_ID }, { authMode: 'userPool' });
+      }
+      await load();
+    } catch {
+      setError('Failed to reset the game.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const handleScoreChange = useCallback(
     async (teamId: string, questionNumber: number, points: number, existingId: string | null) => {
       setError(null);
@@ -145,6 +179,22 @@ export default function AdminScoresPage() {
           onScoreChange={handleScoreChange}
         />
       )}
+
+      <div className="mt-10 rounded-lg border border-red-200 bg-red-50 p-4">
+        <h2 className="text-sm font-semibold text-red-800">Danger Zone</h2>
+        <p className="mt-1 text-sm text-red-700">
+          Delete all scores and reset the game to &ldquo;not started&rdquo;. Teams and
+          scorekeeper assignments are kept.
+        </p>
+        <button
+          type="button"
+          onClick={handleReset}
+          disabled={busy || loading}
+          className="mt-3 rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+        >
+          Reset Scores &amp; Questions
+        </button>
+      </div>
     </div>
   );
 }
