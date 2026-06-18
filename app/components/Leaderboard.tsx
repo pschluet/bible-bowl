@@ -143,9 +143,10 @@ function GroupSection({
   if (teams.length === 0) return null;
   return (
     <div className="mt-3">
-      <div className="flex items-center gap-2 px-4 pb-1 pt-2">
-        <GroupPill groupType={groupType} />
-        {!groupType && <span className="text-sm font-semibold text-gray-500">{label}</span>}
+      <div className="px-4 pb-1 pt-2">
+        <span className={groupType ? 'text-lg font-bold text-gray-700' : 'text-sm font-semibold text-gray-500'}>
+          {label}
+        </span>
       </div>
       <div className="divide-y divide-gray-200 bg-white">
         {teams.map((team, i) => (
