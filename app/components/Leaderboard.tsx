@@ -21,6 +21,23 @@ function rankLabel(rank: number): string {
   return String(rank);
 }
 
+/** Returns the most recent scored entry, or null if the team has no scores. */
+function latestEntry(history: ScoreHistoryEntry[]): ScoreHistoryEntry | null {
+  if (history.length === 0) return null;
+  // history is sorted ascending by questionNumber upstream
+  return history[history.length - 1];
+}
+
+function LatestBadge({ history }: { history: ScoreHistoryEntry[] }) {
+  const latest = latestEntry(history);
+  if (!latest) return null;
+  return (
+    <span className="shrink-0 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-600">
+      Q{latest.questionNumber}: {latest.points}
+    </span>
+  );
+}
+
 function TeamRow({
   team,
   rank,
@@ -43,7 +60,7 @@ function TeamRow({
           {rankLabel(rank)}
         </span>
 
-        {/* Expand/collapse button — covers name + total */}
+        {/* Expand/collapse button — covers name + scores */}
         <button
           type="button"
           aria-expanded={isExpanded}
@@ -51,6 +68,7 @@ function TeamRow({
           className="flex flex-1 items-center gap-2 text-left"
         >
           <span className="flex-1 truncate font-medium text-gray-900">{team.name}</span>
+          <LatestBadge history={team.history} />
           <span className="text-2xl font-bold tabular-nums text-gray-900">{team.total}</span>
           <span
             className={`text-gray-400 transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}
@@ -84,9 +102,11 @@ function TeamRow({
 
 function ScoreHistory({ history }: { history: ScoreHistoryEntry[] }) {
   if (history.length === 0) return <p className="text-sm text-gray-400">No scores yet</p>;
+  // Show most recent question first
+  const descending = [...history].reverse();
   return (
     <ul className="divide-y divide-gray-100">
-      {history.map((entry) => (
+      {descending.map((entry) => (
         <li key={entry.questionNumber} className="flex justify-between py-1 text-sm">
           <span className="text-gray-500">Q{entry.questionNumber}</span>
           <span className="font-medium text-gray-800">{entry.points}</span>
@@ -162,6 +182,7 @@ export default function Leaderboard({
               <span className="text-xs font-semibold uppercase tracking-wide text-amber-600 mr-1">
                 ★ Your Team
               </span>
+              <LatestBadge history={favorite.team.history} />
               <span className="text-2xl font-bold tabular-nums text-gray-900">
                 {favorite.team.total}
               </span>
