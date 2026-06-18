@@ -6,10 +6,12 @@ import { fetchAuthSession } from 'aws-amplify/auth';
 import type { Schema } from '@/amplify/data/resource';
 import { GAME_STATE_ID } from '@/app/lib/constants';
 import Link from 'next/link';
+import { QRCodeSVG } from 'qrcode.react';
 import Leaderboard, { type LeaderboardTeam, type ScoreHistoryEntry } from '@/app/components/Leaderboard';
 
 const FAVORITE_KEY = 'bb_favorite';
 const POLL_MS = 5000;
+const SITE_URL = 'https://bible.pauldev.io/';
 
 const client = generateClient<Schema>();
 
@@ -19,12 +21,23 @@ export default function ViewerPage() {
   const [loading, setLoading] = useState(true);
   const [favoriteTeamId, setFavoriteTeamId] = useState<string | null>(null);
   const [groups, setGroups] = useState<string[]>([]);
+  const [qrExpanded, setQrExpanded] = useState(false);
 
   useEffect(() => {
     // localStorage is unavailable during SSR, so read it after mount.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setFavoriteTeamId(localStorage.getItem(FAVORITE_KEY));
   }, []);
+
+  // Close full-screen QR on Escape
+  useEffect(() => {
+    if (!qrExpanded) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setQrExpanded(false);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [qrExpanded]);
 
   const onFavorite = useCallback((id: string) => {
     setFavoriteTeamId((prev) => {
@@ -88,7 +101,7 @@ export default function ViewerPage() {
 
   return (
     <main className="flex min-h-full flex-col">
-      <header className="border-b border-gray-200 bg-white px-4 py-4 text-center">
+      <header className="relative border-b border-gray-200 bg-white px-4 py-4 text-center">
         <h1 className="text-xl font-bold text-indigo-700">🏆 Bible Bowl Live Scores</h1>
         <p className="mt-1 text-sm text-gray-500">
           {currentQuestion === null ? 'Waiting to start' : `Question ${currentQuestion}`}
@@ -113,7 +126,31 @@ export default function ViewerPage() {
             )}
           </nav>
         )}
+
+        {/* QR thumbnail — top-right of header */}
+        <button
+          type="button"
+          onClick={() => setQrExpanded(true)}
+          aria-label="Show full-screen QR code"
+          className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 hover:bg-gray-100"
+        >
+          <QRCodeSVG value={SITE_URL} size={40} />
+        </button>
       </header>
+
+      {/* Full-screen QR overlay */}
+      {qrExpanded && (
+        <div
+          role="dialog"
+          aria-label="Full-screen QR code"
+          className="fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-6 bg-black"
+          onClick={() => setQrExpanded(false)}
+        >
+          <QRCodeSVG value={SITE_URL} size={500} bgColor="#000000" fgColor="#ffffff" />
+          <p className="text-lg font-medium text-white">{SITE_URL}</p>
+        </div>
+      )}
+
       <Leaderboard
         teams={teams}
         favoriteTeamId={favoriteTeamId}
