@@ -20,6 +20,10 @@
     "unauthenticated_identities_enabled": true,
     "mfa_configuration": "NONE"
   },
+  "custom": {
+    "cognitoAdminAccessKeyId": "AKIAEXAMPLE00000000000",
+    "cognitoAdminSecretAccessKey": "exampleSecretAccessKey0000000000000000000"
+  },
   "data": {
     "url": "https://example0000000000000000000.appsync-api.us-east-1.amazonaws.com/graphql",
     "aws_region": "us-east-1",

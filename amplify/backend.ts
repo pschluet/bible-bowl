@@ -59,12 +59,17 @@ const accessKey = new iam.CfnAccessKey(adminStack, 'CognitoAdminAccessKey', {
  */
 new cdk.CfnOutput(adminStack, 'CognitoAdminAccessKeyId', {
   value: accessKey.ref,
-  description:
-    'Set as COGNITO_ADMIN_ACCESS_KEY_ID in Amplify Console → Hosting → Environment Variables',
 });
 
 new cdk.CfnOutput(adminStack, 'CognitoAdminSecretKey', {
   value: accessKey.attrSecretAccessKey,
-  description:
-    'Set as COGNITO_ADMIN_SECRET_ACCESS_KEY in Amplify Console → Hosting → Environment Variables',
+});
+
+// Bake credentials into amplify_outputs.json so the SSR Lambda can read them
+// at runtime without relying on Amplify Hosting env var injection.
+backend.addOutput({
+  custom: {
+    cognitoAdminAccessKeyId: accessKey.ref,
+    cognitoAdminSecretAccessKey: accessKey.attrSecretAccessKey,
+  },
 });

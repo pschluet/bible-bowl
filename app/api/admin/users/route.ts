@@ -13,8 +13,6 @@ import { getServerSession } from '@/app/lib/auth';
 type Role = 'Admins' | 'Scorekeepers';
 
 export async function POST(request: Request) {
-  console.log('[users route] COGNITO_ADMIN_ACCESS_KEY_ID present:', !!process.env.COGNITO_ADMIN_ACCESS_KEY_ID);
-  console.log('[users route] COGNITO_ADMIN_SECRET_ACCESS_KEY present:', !!process.env.COGNITO_ADMIN_SECRET_ACCESS_KEY);
   const session = await getServerSession();
   if (!session?.isAdmin) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -36,10 +34,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "role must be 'Admins' or 'Scorekeepers'" }, { status: 400 });
   }
 
-  const accessKeyId = process.env.COGNITO_ADMIN_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.COGNITO_ADMIN_SECRET_ACCESS_KEY;
+  const accessKeyId = (outputs as { custom?: Record<string, string> }).custom?.cognitoAdminAccessKeyId;
+  const secretAccessKey = (outputs as { custom?: Record<string, string> }).custom?.cognitoAdminSecretAccessKey;
   if (!accessKeyId || !secretAccessKey) {
-    console.error('Missing COGNITO_ADMIN_ACCESS_KEY_ID or COGNITO_ADMIN_SECRET_ACCESS_KEY env vars');
+    console.error('Missing cognitoAdminAccessKeyId or cognitoAdminSecretAccessKey in amplify_outputs.json');
     return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
   }
 

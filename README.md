@@ -76,20 +76,8 @@ After the sandbox is running (or after your first deploy), create an admin and s
 
 1. Create a new app in the [Amplify Console](https://console.aws.amazon.com/amplify/) and connect it to this GitHub repo.
 2. Select `main` as the production branch. Amplify uses `amplify.yml` to deploy the backend and build the frontend automatically on every merge to `main`.
-3. After the first deploy, retrieve the Cognito admin IAM credentials that the backend stack outputs. These are used by the in-app admin user-creation route:
 
-   ```bash
-   aws cloudformation describe-stacks \
-     --stack-name amplify-<APP_ID>-main-BibleBowlAdminStack \
-     --query 'Stacks[0].Outputs' \
-     --output table
-   ```
-
-4. In **Amplify Console → Hosting → Environment Variables**, add:
-   - `COGNITO_ADMIN_ACCESS_KEY_ID` = the `CognitoAdminAccessKeyId` output value
-   - `COGNITO_ADMIN_SECRET_ACCESS_KEY` = the `CognitoAdminSecretKey` output value
-
-5. Redeploy. These variables are required for creating users through the app at `/admin/users`.
+The backend CDK stack creates a scoped IAM user for Cognito admin operations and writes its credentials directly into `amplify_outputs.json` via `backend.addOutput()`. The frontend build picks them up from there — no environment variables need to be set manually in the Console.
 
 ## CI/CD
 
