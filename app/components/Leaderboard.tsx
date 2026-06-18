@@ -1,0 +1,120 @@
+'use client';
+
+export type LeaderboardTeam = { id: string; name: string; total: number };
+
+type LeaderboardProps = {
+  teams: LeaderboardTeam[];
+  favoriteTeamId: string | null;
+  onFavorite: (id: string) => void;
+  currentQuestion: number | null;
+  loading: boolean;
+};
+
+function rankLabel(rank: number): string {
+  if (rank === 1) return '🥇';
+  if (rank === 2) return '🥈';
+  if (rank === 3) return '🥉';
+  return String(rank);
+}
+
+function TeamRow({
+  team,
+  rank,
+  isFavorite,
+  onFavorite,
+}: {
+  team: LeaderboardTeam;
+  rank: number;
+  isFavorite: boolean;
+  onFavorite: (id: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 py-4 px-4">
+      <span className="w-8 text-center text-lg font-semibold text-gray-500">{rankLabel(rank)}</span>
+      <span className="flex-1 truncate font-medium text-gray-900">{team.name}</span>
+      <span className="text-2xl font-bold tabular-nums text-gray-900">{team.total}</span>
+      <button
+        type="button"
+        aria-label={isFavorite ? 'Remove favorite' : 'Set as favorite'}
+        onClick={() => onFavorite(team.id)}
+        className={`text-2xl leading-none transition-colors ${
+          isFavorite ? 'text-amber-400' : 'text-gray-300 hover:text-amber-300'
+        }`}
+      >
+        ★
+      </button>
+    </div>
+  );
+}
+
+export default function Leaderboard({
+  teams,
+  favoriteTeamId,
+  onFavorite,
+  currentQuestion,
+  loading,
+}: LeaderboardProps) {
+  if (loading) {
+    return (
+      <div className="flex flex-1 items-center justify-center py-20">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-indigo-600" />
+      </div>
+    );
+  }
+
+  if (teams.length === 0) {
+    return (
+      <div className="flex flex-1 items-center justify-center py-20 text-gray-500">
+        No teams yet
+      </div>
+    );
+  }
+
+  const ranked = teams.map((team, i) => ({ team, rank: i + 1 }));
+  const favorite = ranked.find((r) => r.team.id === favoriteTeamId);
+
+  return (
+    <div className="mx-auto w-full max-w-lg flex-1 overflow-y-auto">
+      {currentQuestion !== null && (
+        <div className="flex justify-center px-4 pt-3">
+          <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800">
+            Now on Q{currentQuestion}
+          </span>
+        </div>
+      )}
+
+      {favorite && (
+        <div className="sticky top-0 z-10 px-4 pt-3">
+          <div className="rounded-xl border border-amber-300 bg-white p-4 shadow-md">
+            <div className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-amber-600">
+              <span className="text-amber-400">★</span> Your Team
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="w-8 text-center text-lg font-semibold text-gray-500">
+                {rankLabel(favorite.rank)}
+              </span>
+              <span className="flex-1 truncate font-semibold text-gray-900">
+                {favorite.team.name}
+              </span>
+              <span className="text-2xl font-bold tabular-nums text-gray-900">
+                {favorite.team.total}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-3 divide-y divide-gray-200 bg-white">
+        {ranked.map(({ team, rank }) => (
+          <TeamRow
+            key={team.id}
+            team={team}
+            rank={rank}
+            isFavorite={team.id === favoriteTeamId}
+            onFavorite={onFavorite}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
