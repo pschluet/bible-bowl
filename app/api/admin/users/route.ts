@@ -34,12 +34,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "role must be 'Admins' or 'Scorekeepers'" }, { status: 400 });
   }
 
+  const accessKeyId = process.env.COGNITO_ADMIN_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.COGNITO_ADMIN_SECRET_ACCESS_KEY;
+  if (!accessKeyId || !secretAccessKey) {
+    console.error('Missing COGNITO_ADMIN_ACCESS_KEY_ID or COGNITO_ADMIN_SECRET_ACCESS_KEY env vars');
+    return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
+  }
+
   const cognitoClient = new CognitoIdentityProviderClient({
     region: outputs.auth.aws_region,
-    credentials: {
-      accessKeyId: process.env.COGNITO_ADMIN_ACCESS_KEY_ID!,
-      secretAccessKey: process.env.COGNITO_ADMIN_SECRET_ACCESS_KEY!,
-    },
+    credentials: { accessKeyId, secretAccessKey },
   });
 
   try {
