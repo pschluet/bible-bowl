@@ -19,14 +19,28 @@ export default function ViewerPage() {
   const [teams, setTeams] = useState<LeaderboardTeam[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
-  const [favoriteTeamId, setFavoriteTeamId] = useState<string | null>(null);
+  const [favoriteTeamIds, setFavoriteTeamIds] = useState<Set<string>>(new Set());
   const [groups, setGroups] = useState<string[]>([]);
   const [qrExpanded, setQrExpanded] = useState(false);
 
   useEffect(() => {
     // localStorage is unavailable during SSR, so read it after mount.
+    // Support both the new JSON-array format and the legacy plain-string format.
+    const raw = localStorage.getItem(FAVORITE_KEY);
+    if (!raw) return;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setFavoriteTeamIds(new Set(parsed as string[]));
+        return;
+      }
+    } catch {
+      // Not valid JSON — fall through to legacy handling.
+    }
+    // Legacy: a bare team-id string.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFavoriteTeamId(localStorage.getItem(FAVORITE_KEY));
+    setFavoriteTeamIds(new Set([raw]));
   }, []);
 
   // Close full-screen QR on Escape
@@ -40,9 +54,10 @@ export default function ViewerPage() {
   }, [qrExpanded]);
 
   const onFavorite = useCallback((id: string) => {
-    setFavoriteTeamId((prev) => {
-      const next = prev === id ? null : id;
-      if (next) localStorage.setItem(FAVORITE_KEY, next);
+    setFavoriteTeamIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.size) localStorage.setItem(FAVORITE_KEY, JSON.stringify([...next]));
       else localStorage.removeItem(FAVORITE_KEY);
       return next;
     });
@@ -154,7 +169,7 @@ export default function ViewerPage() {
 
       <Leaderboard
         teams={teams}
-        favoriteTeamId={favoriteTeamId}
+        favoriteTeamIds={favoriteTeamIds}
         onFavorite={onFavorite}
         currentQuestion={currentQuestion}
         loading={loading}

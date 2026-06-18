@@ -16,7 +16,7 @@ export type LeaderboardTeam = {
 
 type LeaderboardProps = {
   teams: LeaderboardTeam[];
-  favoriteTeamId: string | null;
+  favoriteTeamIds: Set<string>;
   onFavorite: (id: string) => void;
   currentQuestion: number | null;
   loading: boolean;
@@ -127,7 +127,7 @@ function GroupSection({
   label,
   groupType,
   teams,
-  favoriteTeamId,
+  favoriteTeamIds,
   onFavorite,
   expandedIds,
   onToggle,
@@ -135,7 +135,7 @@ function GroupSection({
   label: string;
   groupType: string | null;
   teams: LeaderboardTeam[];
-  favoriteTeamId: string | null;
+  favoriteTeamIds: Set<string>;
   onFavorite: (id: string) => void;
   expandedIds: Set<string>;
   onToggle: (id: string) => void;
@@ -153,7 +153,7 @@ function GroupSection({
             key={team.id}
             team={team}
             rank={i + 1}
-            isFavorite={team.id === favoriteTeamId}
+            isFavorite={favoriteTeamIds.has(team.id)}
             onFavorite={onFavorite}
             isExpanded={expandedIds.has(team.id)}
             onToggle={onToggle}
@@ -166,7 +166,7 @@ function GroupSection({
 
 export default function Leaderboard({
   teams,
-  favoriteTeamId,
+  favoriteTeamIds,
   onFavorite,
   currentQuestion,
   loading,
@@ -178,7 +178,13 @@ export default function Leaderboard({
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
-  const [favoriteExpanded, setFavoriteExpanded] = useState(false);
+  const [favExpandedIds, setFavExpandedIds] = useState<Set<string>>(new Set());
+  const onFavToggle = (id: string) =>
+    setFavExpandedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
 
   if (loading) {
     return (
@@ -207,16 +213,14 @@ export default function Leaderboard({
     byGroup.get(key)!.push(team);
   }
 
-  // Find the favorite team across all groups and its within-group rank
-  let favorite: { team: LeaderboardTeam; rank: number } | null = null;
-  if (favoriteTeamId) {
+  // Find all favorited teams across all groups with their within-group ranks, in group display order
+  const favorites: { team: LeaderboardTeam; rank: number }[] = [];
+  if (favoriteTeamIds.size) {
     for (const g of [...GROUP_TYPES, 'Other']) {
       const groupTeams = byGroup.get(g) ?? [];
-      const idx = groupTeams.findIndex((t) => t.id === favoriteTeamId);
-      if (idx !== -1) {
-        favorite = { team: groupTeams[idx], rank: idx + 1 };
-        break;
-      }
+      groupTeams.forEach((t, idx) => {
+        if (favoriteTeamIds.has(t.id)) favorites.push({ team: t, rank: idx + 1 });
+      });
     }
   }
 
@@ -230,47 +234,52 @@ export default function Leaderboard({
         </div>
       )}
 
-      {/* Favorite sticky card */}
-      {favorite && (
-        <div className="sticky top-0 z-10 px-4 pt-3">
-          <div className="rounded-xl border border-amber-300 bg-white shadow-md">
-            <button
-              type="button"
-              aria-expanded={favoriteExpanded}
-              onClick={() => setFavoriteExpanded((prev) => !prev)}
-              className="flex w-full items-center gap-3 p-4 text-left"
-            >
-              <span className="w-8 shrink-0 text-center text-lg font-semibold text-gray-500">
-                {rankLabel(favorite.rank)}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-semibold text-gray-900">
-                  {favorite.team.name}
-                </span>
-                <span className="flex items-center gap-1.5 mt-0.5">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-amber-600">
-                    ★ Your Team
+      {/* Favorite sticky cards — one per favorited team, stacked in a single sticky container */}
+      {favorites.length > 0 && (
+        <div className="sticky top-0 z-10 flex flex-col gap-2 px-4 pt-3">
+          {favorites.map(({ team, rank }) => {
+            const isExpanded = favExpandedIds.has(team.id);
+            return (
+              <div key={team.id} className="rounded-xl border border-amber-300 bg-white shadow-md">
+                <button
+                  type="button"
+                  aria-expanded={isExpanded}
+                  onClick={() => onFavToggle(team.id)}
+                  className="flex w-full items-center gap-3 p-4 text-left"
+                >
+                  <span className="w-8 shrink-0 text-center text-lg font-semibold text-gray-500">
+                    {rankLabel(rank)}
                   </span>
-                  <GroupPill groupType={favorite.team.groupType} />
-                </span>
-              </span>
-              <LatestBadge history={favorite.team.history} />
-              <span className="text-2xl font-bold tabular-nums text-gray-900">
-                {favorite.team.total}
-              </span>
-              <span
-                className={`text-amber-400 transition-transform duration-150 ${favoriteExpanded ? 'rotate-90' : ''}`}
-                aria-hidden
-              >
-                ▸
-              </span>
-            </button>
-            {favoriteExpanded && (
-              <div className="border-t border-amber-100 bg-amber-50 px-4 pb-3 pt-2">
-                <ScoreHistory history={favorite.team.history} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-semibold text-gray-900">
+                      {team.name}
+                    </span>
+                    <span className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-amber-600">
+                        ★ Your Team
+                      </span>
+                      <GroupPill groupType={team.groupType} />
+                    </span>
+                  </span>
+                  <LatestBadge history={team.history} />
+                  <span className="text-2xl font-bold tabular-nums text-gray-900">
+                    {team.total}
+                  </span>
+                  <span
+                    className={`text-amber-400 transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}
+                    aria-hidden
+                  >
+                    ▸
+                  </span>
+                </button>
+                {isExpanded && (
+                  <div className="border-t border-amber-100 bg-amber-50 px-4 pb-3 pt-2">
+                    <ScoreHistory history={team.history} />
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            );
+          })}
         </div>
       )}
 
@@ -281,7 +290,7 @@ export default function Leaderboard({
           groupType={g}
           label={GROUP_LABELS[g]}
           teams={byGroup.get(g) ?? []}
-          favoriteTeamId={favoriteTeamId}
+          favoriteTeamIds={favoriteTeamIds}
           onFavorite={onFavorite}
           expandedIds={expandedIds}
           onToggle={onToggle}
@@ -291,7 +300,7 @@ export default function Leaderboard({
         groupType={null}
         label="Other"
         teams={byGroup.get('Other') ?? []}
-        favoriteTeamId={favoriteTeamId}
+        favoriteTeamIds={favoriteTeamIds}
         onFavorite={onFavorite}
         expandedIds={expandedIds}
         onToggle={onToggle}
