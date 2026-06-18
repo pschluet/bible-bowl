@@ -10,7 +10,7 @@ import ScoreEntry from '@/app/components/ScoreEntry';
 
 type Team = Schema['Team']['type'];
 
-const client = generateClient<Schema>();
+const client = generateClient<Schema>({ authMode: 'userPool' });
 
 export default function ScorekeeperPage() {
   const [loading, setLoading] = useState(true);
