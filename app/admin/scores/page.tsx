@@ -131,6 +131,19 @@ export default function AdminScoresPage() {
     [load]
   );
 
+  const handleScoreDelete = useCallback(
+    async (existingId: string) => {
+      setError(null);
+      try {
+        await client.models.Score.delete({ id: existingId }, { authMode: 'userPool' });
+        await load();
+      } catch {
+        setError('Failed to clear score.');
+      }
+    },
+    [load]
+  );
+
   return (
     <div className="mx-auto max-w-5xl">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
@@ -177,6 +190,7 @@ export default function AdminScoresPage() {
           scores={scores}
           currentQuestion={currentQuestion}
           onScoreChange={handleScoreChange}
+          onScoreDelete={handleScoreDelete}
         />
       )}
 

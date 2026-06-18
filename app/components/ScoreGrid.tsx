@@ -16,6 +16,7 @@ interface ScoreGridProps {
     points: number,
     existingId: string | null
   ) => void;
+  onScoreDelete?: (existingId: string) => void;
 }
 
 const POINT_OPTIONS = [0, 1, 2, 3] as const;
@@ -25,6 +26,7 @@ export default function ScoreGrid({
   scores,
   currentQuestion,
   onScoreChange,
+  onScoreDelete,
 }: ScoreGridProps) {
   // editing cell key: `${teamId}:${questionNumber}` or null
   const [editing, setEditing] = useState<string | null>(null);
@@ -125,6 +127,19 @@ export default function ScoreGrid({
                               {pts}
                             </button>
                           ))}
+                          {existing && onScoreDelete && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onScoreDelete(existing.id);
+                                setEditing(null);
+                              }}
+                              className="h-7 w-7 rounded bg-gray-300 text-xs font-semibold text-gray-700 hover:bg-red-500 hover:text-white"
+                              title="Clear score"
+                            >
+                              ×
+                            </button>
+                          )}
                         </div>
                       ) : (
                         <button
