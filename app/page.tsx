@@ -77,6 +77,7 @@ export default function ViewerPage() {
         id: team.id,
         name: team.name,
         total: totals.get(team.id) ?? 0,
+        groupType: team.groupType ?? null,
         history: (historyByTeam.get(team.id) ?? []).sort(
           (a, b) => a.questionNumber - b.questionNumber
         ),

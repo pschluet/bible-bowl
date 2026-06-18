@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '@/amplify/data/resource';
+import GroupPill from '@/app/components/GroupPill';
 
 type Team = Schema['Team']['type'];
 
@@ -54,8 +55,9 @@ export default function ScoreEntry({
 
   return (
     <div className="space-y-6">
-      <div className="text-center">
+      <div className="flex flex-col items-center gap-1 text-center">
         <h2 className="text-2xl font-bold text-gray-900">{team.name}</h2>
+        <GroupPill groupType={team.groupType} />
       </div>
 
       {currentQuestion === null ? (

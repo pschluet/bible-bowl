@@ -1,10 +1,18 @@
 'use client';
 
 import { useState } from 'react';
+import GroupPill from '@/app/components/GroupPill';
+import { GROUP_TYPES, GROUP_LABELS } from '@/app/lib/constants';
 
 export type ScoreHistoryEntry = { questionNumber: number; points: number };
 
-export type LeaderboardTeam = { id: string; name: string; total: number; history: ScoreHistoryEntry[] };
+export type LeaderboardTeam = {
+  id: string;
+  name: string;
+  total: number;
+  groupType: string | null;
+  history: ScoreHistoryEntry[];
+};
 
 type LeaderboardProps = {
   teams: LeaderboardTeam[];
@@ -24,7 +32,6 @@ function rankLabel(rank: number): string {
 /** Returns the most recent scored entry, or null if the team has no scores. */
 function latestEntry(history: ScoreHistoryEntry[]): ScoreHistoryEntry | null {
   if (history.length === 0) return null;
-  // history is sorted ascending by questionNumber upstream
   return history[history.length - 1];
 }
 
@@ -102,7 +109,6 @@ function TeamRow({
 
 function ScoreHistory({ history }: { history: ScoreHistoryEntry[] }) {
   if (history.length === 0) return <p className="text-sm text-gray-400">No scores yet</p>;
-  // Show most recent question first
   const descending = [...history].reverse();
   return (
     <ul className="divide-y divide-gray-100">
@@ -113,6 +119,48 @@ function ScoreHistory({ history }: { history: ScoreHistoryEntry[] }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** One group's ranked leaderboard section. */
+function GroupSection({
+  label,
+  groupType,
+  teams,
+  favoriteTeamId,
+  onFavorite,
+  expandedIds,
+  onToggle,
+}: {
+  label: string;
+  groupType: string | null;
+  teams: LeaderboardTeam[];
+  favoriteTeamId: string | null;
+  onFavorite: (id: string) => void;
+  expandedIds: Set<string>;
+  onToggle: (id: string) => void;
+}) {
+  if (teams.length === 0) return null;
+  return (
+    <div className="mt-3">
+      <div className="flex items-center gap-2 px-4 pb-1 pt-2">
+        <GroupPill groupType={groupType} />
+        {!groupType && <span className="text-sm font-semibold text-gray-500">{label}</span>}
+      </div>
+      <div className="divide-y divide-gray-200 bg-white">
+        {teams.map((team, i) => (
+          <TeamRow
+            key={team.id}
+            team={team}
+            rank={i + 1}
+            isFavorite={team.id === favoriteTeamId}
+            onFavorite={onFavorite}
+            isExpanded={expandedIds.has(team.id)}
+            onToggle={onToggle}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -148,8 +196,29 @@ export default function Leaderboard({
     );
   }
 
-  const ranked = teams.map((team, i) => ({ team, rank: i + 1 }));
-  const favorite = ranked.find((r) => r.team.id === favoriteTeamId);
+  // Partition teams into groups (already sorted by total desc from page.tsx)
+  const byGroup = new Map<string, LeaderboardTeam[]>();
+  for (const g of GROUP_TYPES) byGroup.set(g, []);
+  byGroup.set('Other', []);
+  for (const team of teams) {
+    const key = team.groupType && GROUP_TYPES.includes(team.groupType as (typeof GROUP_TYPES)[number])
+      ? team.groupType
+      : 'Other';
+    byGroup.get(key)!.push(team);
+  }
+
+  // Find the favorite team across all groups and its within-group rank
+  let favorite: { team: LeaderboardTeam; rank: number } | null = null;
+  if (favoriteTeamId) {
+    for (const g of [...GROUP_TYPES, 'Other']) {
+      const groupTeams = byGroup.get(g) ?? [];
+      const idx = groupTeams.findIndex((t) => t.id === favoriteTeamId);
+      if (idx !== -1) {
+        favorite = { team: groupTeams[idx], rank: idx + 1 };
+        break;
+      }
+    }
+  }
 
   return (
     <div className="mx-auto w-full max-w-lg flex-1 overflow-y-auto">
@@ -161,6 +230,7 @@ export default function Leaderboard({
         </div>
       )}
 
+      {/* Favorite sticky card */}
       {favorite && (
         <div className="sticky top-0 z-10 px-4 pt-3">
           <div className="rounded-xl border border-amber-300 bg-white shadow-md">
@@ -170,17 +240,19 @@ export default function Leaderboard({
               onClick={() => setFavoriteExpanded((prev) => !prev)}
               className="flex w-full items-center gap-3 p-4 text-left"
             >
-              <div className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-amber-600 sr-only">
-                Your Team
-              </div>
               <span className="w-8 shrink-0 text-center text-lg font-semibold text-gray-500">
                 {rankLabel(favorite.rank)}
               </span>
-              <span className="flex-1 truncate font-semibold text-gray-900">
-                {favorite.team.name}
-              </span>
-              <span className="text-xs font-semibold uppercase tracking-wide text-amber-600 mr-1">
-                ★ Your Team
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-semibold text-gray-900">
+                  {favorite.team.name}
+                </span>
+                <span className="flex items-center gap-1.5 mt-0.5">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-amber-600">
+                    ★ Your Team
+                  </span>
+                  <GroupPill groupType={favorite.team.groupType} />
+                </span>
               </span>
               <LatestBadge history={favorite.team.history} />
               <span className="text-2xl font-bold tabular-nums text-gray-900">
@@ -202,19 +274,28 @@ export default function Leaderboard({
         </div>
       )}
 
-      <div className="mt-3 divide-y divide-gray-200 bg-white">
-        {ranked.map(({ team, rank }) => (
-          <TeamRow
-            key={team.id}
-            team={team}
-            rank={rank}
-            isFavorite={team.id === favoriteTeamId}
-            onFavorite={onFavorite}
-            isExpanded={expandedIds.has(team.id)}
-            onToggle={onToggle}
-          />
-        ))}
-      </div>
+      {/* One section per group in defined order, then Other */}
+      {GROUP_TYPES.map((g) => (
+        <GroupSection
+          key={g}
+          groupType={g}
+          label={GROUP_LABELS[g]}
+          teams={byGroup.get(g) ?? []}
+          favoriteTeamId={favoriteTeamId}
+          onFavorite={onFavorite}
+          expandedIds={expandedIds}
+          onToggle={onToggle}
+        />
+      ))}
+      <GroupSection
+        groupType={null}
+        label="Other"
+        teams={byGroup.get('Other') ?? []}
+        favoriteTeamId={favoriteTeamId}
+        onFavorite={onFavorite}
+        expandedIds={expandedIds}
+        onToggle={onToggle}
+      />
     </div>
   );
 }

@@ -35,6 +35,7 @@ const schema = a.schema({
       scorekeeperUserId: a.string(),
       scorekeeperEmail: a.string(),
       displayOrder: a.integer(),
+      groupType: a.enum(['Teen', 'PreTeen', 'Adult']),
     })
     .authorization((allow) => [
       allow.guest().to(['read']),

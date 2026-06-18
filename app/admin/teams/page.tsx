@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '@/amplify/data/resource';
-import { compareTeamOrder } from '@/app/lib/constants';
+import { compareTeamOrder, GROUP_LABELS, GROUP_TYPES, type GroupType } from '@/app/lib/constants';
+import GroupPill from '@/app/components/GroupPill';
 
 type Team = Schema['Team']['type'];
 
@@ -15,6 +16,7 @@ export default function AdminTeamsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [newName, setNewName] = useState('');
+  const [newGroup, setNewGroup] = useState<GroupType>('Teen');
   const [adding, setAdding] = useState(false);
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -45,7 +47,7 @@ export default function AdminTeamsPage() {
     setAdding(true);
     setError(null);
     try {
-      await client.models.Team.create({ name }, { authMode: 'userPool' });
+      await client.models.Team.create({ name, groupType: newGroup }, { authMode: 'userPool' });
       setNewName('');
       await load();
     } catch {
@@ -65,6 +67,16 @@ export default function AdminTeamsPage() {
       await load();
     } catch {
       setError('Failed to update team.');
+    }
+  }
+
+  async function handleGroupChange(id: string, groupType: GroupType) {
+    setError(null);
+    try {
+      await client.models.Team.update({ id, groupType }, { authMode: 'userPool' });
+      await load();
+    } catch {
+      setError('Failed to update group.');
     }
   }
 
@@ -132,6 +144,7 @@ export default function AdminTeamsPage() {
         <div className="mb-4 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>
       )}
 
+      {/* Add team row */}
       <div className="mb-6 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-white p-4">
         <input
           type="text"
@@ -143,6 +156,15 @@ export default function AdminTeamsPage() {
           placeholder="Church name"
           className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
         />
+        <select
+          value={newGroup}
+          onChange={(e) => setNewGroup(e.target.value as GroupType)}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+        >
+          {GROUP_TYPES.map((g) => (
+            <option key={g} value={g}>{GROUP_LABELS[g]}</option>
+          ))}
+        </select>
         <button
           type="button"
           onClick={handleAdd}
@@ -206,6 +228,22 @@ export default function AdminTeamsPage() {
                 )}
                 <p className="truncate text-xs text-gray-400">{team.scorekeeperEmail ?? '—'}</p>
               </div>
+
+              {/* Group selector */}
+              <select
+                value={team.groupType ?? ''}
+                onChange={(e) => {
+                  if (e.target.value) void handleGroupChange(team.id, e.target.value as GroupType);
+                }}
+                className="rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
+                aria-label={`Group for ${team.name}`}
+              >
+                <option value="">— group —</option>
+                {GROUP_TYPES.map((g) => (
+                  <option key={g} value={g}>{GROUP_LABELS[g]}</option>
+                ))}
+              </select>
+
               <div className="flex items-center gap-2">
                 {team.scorekeeperUserId && (
                   <button

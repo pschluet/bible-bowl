@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { Schema } from '@/amplify/data/resource';
 import { compareTeamOrder } from '@/app/lib/constants';
+import GroupPill from '@/app/components/GroupPill';
 
 type Team = Schema['Team']['type'];
 type Score = Schema['Score']['type'];
@@ -100,7 +101,10 @@ export default function ScoreGrid({
             return (
               <tr key={team.id}>
                 <td className="sticky left-0 z-10 border border-gray-200 bg-white px-3 py-2 font-medium text-gray-900">
-                  {team.name}
+                  <div className="flex items-center gap-1.5">
+                    <span>{team.name}</span>
+                    <GroupPill groupType={team.groupType} />
+                  </div>
                 </td>
                 {questionNumbers.map((q) => {
                   const existing = byQuestion?.get(q) ?? null;

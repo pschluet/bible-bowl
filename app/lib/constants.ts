@@ -7,6 +7,17 @@
 /** The fixed DynamoDB record ID for the GameState singleton. */
 export const GAME_STATE_ID = 'SINGLETON';
 
+/** Ordered list of team group types — order defines leaderboard stacking. */
+export const GROUP_TYPES = ['Teen', 'PreTeen', 'Adult'] as const;
+export type GroupType = (typeof GROUP_TYPES)[number];
+
+/** Human-readable labels for each group type. */
+export const GROUP_LABELS: Record<GroupType, string> = {
+  Teen: 'Teen',
+  PreTeen: 'Pre-Teen',
+  Adult: 'Adult',
+};
+
 /**
  * Comparator for sorting teams by admin-assigned display order.
  * Teams without an explicit order (null/undefined) sort after those with one,

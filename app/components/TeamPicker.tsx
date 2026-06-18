@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { Schema } from '@/amplify/data/resource';
+import { GROUP_LABELS, type GroupType } from '@/app/lib/constants';
 
 type Team = Schema['Team']['type'];
 
@@ -39,11 +40,17 @@ export default function TeamPicker({ unclaimedTeams, onClaim, loading = false }:
         <option value="" disabled>
           Choose a team…
         </option>
-        {unclaimedTeams.map((team) => (
-          <option key={team.id} value={team.id}>
-            {team.name}
-          </option>
-        ))}
+        {unclaimedTeams.map((team) => {
+          const groupLabel =
+            team.groupType && team.groupType in GROUP_LABELS
+              ? GROUP_LABELS[team.groupType as GroupType]
+              : null;
+          return (
+            <option key={team.id} value={team.id}>
+              {team.name}{groupLabel ? ` — ${groupLabel}` : ''}
+            </option>
+          );
+        })}
       </select>
       <button
         type="submit"
