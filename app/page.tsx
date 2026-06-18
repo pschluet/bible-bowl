@@ -5,7 +5,7 @@ import { generateClient } from 'aws-amplify/data';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import type { Schema } from '@/amplify/data/resource';
 import { GAME_STATE_ID } from '@/app/lib/constants';
-import Leaderboard, { type LeaderboardTeam } from '@/app/components/Leaderboard';
+import Leaderboard, { type LeaderboardTeam, type ScoreHistoryEntry } from '@/app/components/Leaderboard';
 
 const FAVORITE_KEY = 'bb_favorite';
 const POLL_MS = 5000;
@@ -46,8 +46,12 @@ export default function ViewerPage() {
     ]);
 
     const totals = new Map<string, number>();
+    const historyByTeam = new Map<string, ScoreHistoryEntry[]>();
     for (const score of scoresRes.data) {
       totals.set(score.teamId, (totals.get(score.teamId) ?? 0) + (score.points ?? 0));
+      const arr = historyByTeam.get(score.teamId) ?? [];
+      arr.push({ questionNumber: score.questionNumber, points: score.points ?? 0 });
+      historyByTeam.set(score.teamId, arr);
     }
 
     const computed: LeaderboardTeam[] = teamsRes.data
@@ -55,6 +59,9 @@ export default function ViewerPage() {
         id: team.id,
         name: team.name,
         total: totals.get(team.id) ?? 0,
+        history: (historyByTeam.get(team.id) ?? []).sort(
+          (a, b) => a.questionNumber - b.questionNumber
+        ),
       }))
       .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
 
