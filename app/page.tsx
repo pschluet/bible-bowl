@@ -159,10 +159,16 @@ export default function ViewerPage() {
         <div
           role="dialog"
           aria-label="Full-screen QR code"
-          className="fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-6 bg-black"
+          className="fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-6 bg-black p-6"
           onClick={() => setQrExpanded(false)}
         >
-          <QRCodeSVG value={SITE_URL} size={500} bgColor="#000000" fgColor="#ffffff" />
+          <QRCodeSVG
+            value={SITE_URL}
+            size={500}
+            bgColor="#000000"
+            fgColor="#ffffff"
+            className="h-auto w-full max-w-[500px]"
+          />
           <p className="text-lg font-medium text-white">{SITE_URL}</p>
         </div>
       )}
