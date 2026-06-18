@@ -47,7 +47,8 @@ export default function AdminTeamsPage() {
     setAdding(true);
     setError(null);
     try {
-      await client.models.Team.create({ name, groupType: newGroup }, { authMode: 'userPool' });
+      const displayOrder = teams.reduce((m, t) => Math.max(m, t.displayOrder ?? -1), -1) + 1;
+      await client.models.Team.create({ name, groupType: newGroup, displayOrder }, { authMode: 'userPool' });
       setNewName('');
       await load();
     } catch {
