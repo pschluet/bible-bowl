@@ -1,16 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Schema } from '@/amplify/data/resource';
-import { compareTeamOrder } from '@/app/lib/constants';
 import GroupPill from '@/app/components/GroupPill';
+import { POINT_OPTIONS } from '@/app/lib/constants';
 
 type Team = Schema['Team']['type'];
 type Score = Schema['Score']['type'];
 
 interface ScoreGridProps {
-  teams: Team[];
-  scores: Score[];
+  teams: Team[]; // already sorted
+  scoreMap: Map<string, Map<number, Score>>;
   currentQuestion: number | null;
   onScoreChange: (
     teamId: string,
@@ -19,32 +19,43 @@ interface ScoreGridProps {
     existingId: string | null
   ) => void;
   onScoreDelete?: (existingId: string) => void;
+  selectedTeamId: string | null;
+  onSelect: (id: string) => void;
+  onSelectNext: () => void;
+  onSelectPrev: () => void;
+  onEnterScore: (teamId: string, points: number) => void;
+  recentEntry: { teamId: string; points: number } | null;
 }
-
-const POINT_OPTIONS = [0, 1, 2, 3] as const;
 
 export default function ScoreGrid({
   teams,
-  scores,
+  scoreMap,
   currentQuestion,
   onScoreChange,
   onScoreDelete,
+  selectedTeamId,
+  onSelect,
+  onSelectNext,
+  onSelectPrev,
+  onEnterScore,
+  recentEntry,
 }: ScoreGridProps) {
-  // editing cell key: `${teamId}:${questionNumber}` or null
+  // editing cell key: `${teamId}:${questionNumber}` or null (mouse click-to-edit flow)
   const [editing, setEditing] = useState<string | null>(null);
 
-  // Build a lookup: teamId -> (questionNumber -> Score)
-  const scoreMap = new Map<string, Map<number, Score>>();
-  for (const score of scores) {
-    let byQuestion = scoreMap.get(score.teamId);
-    if (!byQuestion) {
-      byQuestion = new Map<number, Score>();
-      scoreMap.set(score.teamId, byQuestion);
-    }
-    byQuestion.set(score.questionNumber, score);
-  }
+  // Refs to each <tr> so we can programmatically focus after arrow-key / number-key advances
+  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
 
-  const sortedTeams = [...teams].sort(compareTeamOrder);
+  // Focus the selected row when selection changes programmatically (not via Tab/click)
+  useEffect(() => {
+    if (!selectedTeamId) return;
+    const el = rowRefs.current.get(selectedTeamId);
+    // Skip if this element is already focused — avoids fighting the browser's natural Tab behavior
+    if (el && document.activeElement !== el) {
+      el.focus({ preventScroll: false });
+    }
+  }, [selectedTeamId]);
+
   const questionCount = currentQuestion ?? 0;
   const questionNumbers = Array.from({ length: questionCount }, (_, i) => i + 1);
 
@@ -66,7 +77,7 @@ export default function ScoreGrid({
     setEditing(null);
   }
 
-  if (sortedTeams.length === 0) {
+  if (teams.length === 0) {
     return (
       <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-gray-500">
         No teams yet. Add teams to start scoring.
@@ -96,34 +107,81 @@ export default function ScoreGrid({
           </tr>
         </thead>
         <tbody>
-          {sortedTeams.map((team) => {
+          {teams.map((team) => {
             const byQuestion = scoreMap.get(team.id);
+            const isSelected = team.id === selectedTeamId;
             return (
-              <tr key={team.id}>
-                <td className="sticky left-0 z-10 border border-gray-200 bg-white px-3 py-2 font-medium text-gray-900">
+              <tr
+                key={team.id}
+                tabIndex={0}
+                ref={(el) => {
+                  if (el) rowRefs.current.set(team.id, el);
+                  else rowRefs.current.delete(team.id);
+                }}
+                onFocus={() => onSelect(team.id)}
+                onKeyDown={(e) => {
+                  if (currentQuestion !== null && ['0', '1', '2', '3'].includes(e.key)) {
+                    e.preventDefault();
+                    onEnterScore(team.id, Number(e.key));
+                  } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    onSelectNext();
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    onSelectPrev();
+                  }
+                }}
+                // outline-none removes the default browser focus ring on <tr>;
+                // selection is communicated via background color + left border accent instead.
+                className="outline-none"
+              >
+                {/* Sticky name cell — left accent bar when selected */}
+                <td
+                  className={`sticky left-0 z-10 border border-gray-200 px-3 py-2 font-medium text-gray-900 ${
+                    isSelected
+                      ? 'border-l-4 border-l-indigo-500 bg-indigo-50'
+                      : 'bg-white'
+                  }`}
+                >
                   <div className="flex items-center gap-1.5">
                     <span>{team.name}</span>
                     <GroupPill groupType={team.groupType} />
                   </div>
                 </td>
+
                 {questionNumbers.map((q) => {
                   const existing = byQuestion?.get(q) ?? null;
                   const cellKey = `${team.id}:${q}`;
                   const isEditing = editing === cellKey;
                   const isCurrent = q === currentQuestion;
+                  const isFlashing =
+                    isCurrent &&
+                    recentEntry?.teamId === team.id;
+                  // Selected row: bg-indigo-50; current-question column: bg-indigo-50;
+                  // intersection of both: bg-indigo-100 (slightly darker to distinguish both)
+                  const cellBg =
+                    isSelected && isCurrent
+                      ? 'bg-indigo-100'
+                      : isSelected || isCurrent
+                        ? 'bg-indigo-50'
+                        : '';
                   return (
                     <td
                       key={q}
-                      className={`relative border border-gray-200 px-1 py-1 text-center ${
-                        isCurrent ? 'bg-indigo-50' : ''
-                      }`}
+                      className={`relative border border-gray-200 px-1 py-1 text-center ${cellBg}`}
                     >
-                      {isEditing ? (
+                      {isFlashing ? (
+                        // Confirmation flash: show the just-entered value before advancing
+                        <span className="flex h-7 w-full items-center justify-center rounded bg-green-500 text-xs font-bold text-white">
+                          {recentEntry!.points}
+                        </span>
+                      ) : isEditing ? (
                         <div className="flex items-center justify-center gap-0.5">
                           {POINT_OPTIONS.map((pts) => (
                             <button
                               key={pts}
                               type="button"
+                              tabIndex={-1}
                               onClick={() =>
                                 handleSelect(team.id, q, pts, existing ? existing.id : null)
                               }
@@ -135,6 +193,7 @@ export default function ScoreGrid({
                           {existing && onScoreDelete && (
                             <button
                               type="button"
+                              tabIndex={-1}
                               onClick={() => {
                                 onScoreDelete(existing.id);
                                 setEditing(null);
@@ -149,6 +208,7 @@ export default function ScoreGrid({
                       ) : (
                         <button
                           type="button"
+                          tabIndex={-1}
                           onClick={() => setEditing(cellKey)}
                           className="h-7 w-full rounded text-gray-900 hover:bg-gray-100"
                         >
@@ -158,7 +218,12 @@ export default function ScoreGrid({
                     </td>
                   );
                 })}
-                <td className="border border-gray-200 px-3 py-2 text-center font-bold tabular-nums text-gray-900">
+
+                <td
+                  className={`border border-gray-200 px-3 py-2 text-center font-bold tabular-nums text-gray-900 ${
+                    isSelected ? 'bg-indigo-50' : ''
+                  }`}
+                >
                   {teamTotal(team.id)}
                 </td>
               </tr>

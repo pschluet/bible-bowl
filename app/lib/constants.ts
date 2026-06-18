@@ -7,6 +7,9 @@
 /** The fixed DynamoDB record ID for the GameState singleton. */
 export const GAME_STATE_ID = 'SINGLETON';
 
+/** Valid point values a team can receive for a single question. */
+export const POINT_OPTIONS = [0, 1, 2, 3] as const;
+
 /** Ordered list of team group types — order defines leaderboard stacking. */
 export const GROUP_TYPES = ['Teen', 'PreTeen', 'Adult'] as const;
 export type GroupType = (typeof GROUP_TYPES)[number];

@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '@/amplify/data/resource';
-import { GAME_STATE_ID } from '@/app/lib/constants';
+import { GAME_STATE_ID, compareTeamOrder } from '@/app/lib/constants';
 import ScoreGrid from '@/app/components/ScoreGrid';
+import QuickEntryDrawer from '@/app/components/QuickEntryDrawer';
 
 type Team = Schema['Team']['type'];
 type Score = Schema['Score']['type'];
@@ -18,6 +19,43 @@ export default function AdminScoresPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const [quickEntryOpen, setQuickEntryOpen] = useState(false);
+  const [recentEntry, setRecentEntry] = useState<{ teamId: string; points: number } | null>(null);
+  const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear the advance timer on unmount to avoid setState on an unmounted component
+  useEffect(() => () => {
+    if (advanceTimerRef.current !== null) clearTimeout(advanceTimerRef.current);
+  }, []);
+
+  // Sorted teams — single source of truth for order (used by both grid and drawer)
+  const sortedTeams = useMemo(() => [...teams].sort(compareTeamOrder), [teams]);
+
+  // Score lookup: teamId → (questionNumber → Score)
+  const scoreMap = useMemo(() => {
+    const map = new Map<string, Map<number, Score>>();
+    for (const score of scores) {
+      let byQuestion = map.get(score.teamId);
+      if (!byQuestion) {
+        byQuestion = new Map<number, Score>();
+        map.set(score.teamId, byQuestion);
+      }
+      byQuestion.set(score.questionNumber, score);
+    }
+    return map;
+  }, [scores]);
+
+  // Default selection to first team once the game is active
+  useEffect(() => {
+    if (currentQuestion !== null && sortedTeams.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedTeamId((prev) => {
+        if (prev && sortedTeams.some((t) => t.id === prev)) return prev;
+        return sortedTeams[0].id;
+      });
+    }
+  }, [currentQuestion, sortedTeams]);
 
   const load = useCallback(async () => {
     try {
@@ -43,6 +81,25 @@ export default function AdminScoresPage() {
     const interval = setInterval(() => void load(), 5000);
     return () => clearInterval(interval);
   }, [load]);
+
+  // Selection helpers
+  const selectTeam = useCallback((id: string) => setSelectedTeamId(id), []);
+
+  const selectNext = useCallback(() => {
+    setSelectedTeamId((prev) => {
+      const idx = sortedTeams.findIndex((t) => t.id === prev);
+      if (idx >= 0 && idx < sortedTeams.length - 1) return sortedTeams[idx + 1].id;
+      return prev;
+    });
+  }, [sortedTeams]);
+
+  const selectPrev = useCallback(() => {
+    setSelectedTeamId((prev) => {
+      const idx = sortedTeams.findIndex((t) => t.id === prev);
+      if (idx > 0) return sortedTeams[idx - 1].id;
+      return prev;
+    });
+  }, [sortedTeams]);
 
   async function handleInitialize() {
     setBusy(true);
@@ -131,6 +188,25 @@ export default function AdminScoresPage() {
     [load]
   );
 
+  // Shared entry helper used by keyboard shortcuts (grid) and quick-entry drawer:
+  // saves the score, shows a brief confirmation flash, then advances to the next team.
+  const enterScoreAndAdvance = useCallback(
+    (teamId: string, points: number) => {
+      if (currentQuestion === null) return;
+      const existing = scoreMap.get(teamId)?.get(currentQuestion) ?? null;
+      void handleScoreChange(teamId, currentQuestion, points, existing?.id ?? null);
+      // Flash confirmation for ~450 ms before advancing
+      setRecentEntry({ teamId, points });
+      if (advanceTimerRef.current !== null) clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = setTimeout(() => {
+        selectNext();
+        setRecentEntry(null);
+        advanceTimerRef.current = null;
+      }, 450);
+    },
+    [currentQuestion, scoreMap, handleScoreChange, selectNext]
+  );
+
   const handleScoreDelete = useCallback(
     async (existingId: string) => {
       setError(null);
@@ -153,7 +229,7 @@ export default function AdminScoresPage() {
             <p className="text-sm text-gray-500">Current Question: {currentQuestion}</p>
           )}
         </div>
-        <div>
+        <div className="flex items-center gap-2">
           {currentQuestion === null ? (
             <button
               type="button"
@@ -164,14 +240,24 @@ export default function AdminScoresPage() {
               Initialize Game
             </button>
           ) : (
-            <button
-              type="button"
-              onClick={handleNextQuestion}
-              disabled={busy}
-              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-            >
-              Next Question
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setQuickEntryOpen(true)}
+                disabled={busy}
+                className="rounded-md border border-indigo-600 px-4 py-2 text-sm font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
+              >
+                Quick Entry
+              </button>
+              <button
+                type="button"
+                onClick={handleNextQuestion}
+                disabled={busy}
+                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                Next Question
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -186,11 +272,32 @@ export default function AdminScoresPage() {
         </div>
       ) : (
         <ScoreGrid
-          teams={teams}
-          scores={scores}
+          teams={sortedTeams}
+          scoreMap={scoreMap}
           currentQuestion={currentQuestion}
           onScoreChange={handleScoreChange}
           onScoreDelete={handleScoreDelete}
+          selectedTeamId={selectedTeamId}
+          onSelect={selectTeam}
+          onSelectNext={selectNext}
+          onSelectPrev={selectPrev}
+          onEnterScore={enterScoreAndAdvance}
+          recentEntry={recentEntry}
+        />
+      )}
+
+      {quickEntryOpen && (
+        <QuickEntryDrawer
+          sortedTeams={sortedTeams}
+          scoreMap={scoreMap}
+          currentQuestion={currentQuestion}
+          selectedTeamId={selectedTeamId}
+          onSelect={selectTeam}
+          onSelectNext={selectNext}
+          onSelectPrev={selectPrev}
+          onEnterScore={enterScoreAndAdvance}
+          onClose={() => setQuickEntryOpen(false)}
+          recentEntry={recentEntry}
         />
       )}
 
