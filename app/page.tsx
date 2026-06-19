@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import type { Schema } from '@/amplify/data/resource';
-import { GAME_STATE_ID } from '@/app/lib/constants';
+import { GAME_STATE_ID, listAll } from '@/app/lib/constants';
 import Link from 'next/link';
 import { QRCodeSVG } from 'qrcode.react';
 import Leaderboard, { type LeaderboardTeam, type ScoreHistoryEntry } from '@/app/components/Leaderboard';
@@ -72,16 +72,16 @@ export default function ViewerPage() {
       (session?.tokens?.accessToken?.payload['cognito:groups'] as string[] | undefined) ?? []
     );
 
-    const [teamsRes, scoresRes, gameStateRes] = await Promise.all([
-      client.models.Team.list({ authMode }),
-      client.models.Score.list({ authMode }),
+    const [teamsAll, scoresAll, gameStateRes] = await Promise.all([
+      listAll((o) => client.models.Team.list({ ...o, authMode })),
+      listAll((o) => client.models.Score.list({ ...o, authMode })),
       client.models.GameState.get({ id: GAME_STATE_ID }, { authMode }),
     ]);
 
     // De-dupe: keep only the latest record per (teamId, questionNumber) by updatedAt.
     // This guards against duplicate Score records that may exist from prior bugs.
-    const latestByCell = new Map<string, (typeof scoresRes.data)[number]>();
-    for (const s of scoresRes.data) {
+    const latestByCell = new Map<string, (typeof scoresAll)[number]>();
+    for (const s of scoresAll) {
       const k = `${s.teamId}#${s.questionNumber}`;
       const prev = latestByCell.get(k);
       if (!prev || (s.updatedAt ?? '') > (prev.updatedAt ?? '')) latestByCell.set(k, s);
@@ -96,7 +96,7 @@ export default function ViewerPage() {
       historyByTeam.set(score.teamId, arr);
     }
 
-    const computed: LeaderboardTeam[] = teamsRes.data
+    const computed: LeaderboardTeam[] = teamsAll
       .map((team) => ({
         id: team.id,
         name: team.name,

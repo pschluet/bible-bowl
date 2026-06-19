@@ -30,6 +30,27 @@ export const scoreId = (teamId: string, questionNumber: number) =>
   `${teamId}#${questionNumber}`;
 
 /**
+ * Fetch ALL pages of an Amplify list query, working around the 100-item default
+ * page limit. Pass limit: 1000 per page to minimise round trips at full scale
+ * (40 teams × 100 questions ≈ 4 000 records → ~4 pages).
+ */
+export async function listAll<T>(
+  listFn: (opts: {
+    nextToken?: string | null;
+    limit?: number;
+  }) => Promise<{ data: T[]; nextToken?: string | null }>
+): Promise<T[]> {
+  const all: T[] = [];
+  let nextToken: string | null | undefined;
+  do {
+    const { data, nextToken: nt } = await listFn({ nextToken, limit: 1000 });
+    all.push(...data);
+    nextToken = nt;
+  } while (nextToken);
+  return all;
+}
+
+/**
  * Comparator for sorting teams by admin-assigned display order.
  * Teams without an explicit order (null/undefined) sort after those with one,
  * with alphabetical name as the tiebreaker.

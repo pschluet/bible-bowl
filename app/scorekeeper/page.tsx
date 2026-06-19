@@ -52,12 +52,11 @@ export default function ScorekeeperPage() {
     let existingPoints: number | null = null;
     let existingId: string | null = null;
     if (claimed && question !== null) {
-      const scoresRes = await client.models.Score.list({
-        filter: {
-          teamId: { eq: claimed.id },
-          questionNumber: { eq: question },
-        },
-      });
+      // Use the secondary index rather than a scan-and-filter so the lookup is reliable
+      // regardless of how many total Score records exist in the table.
+      const scoresRes = await client.models.Score.listScoreByTeamIdAndQuestionNumber(
+        { teamId: claimed.id, questionNumber: { eq: question } }
+      );
       const existing = scoresRes.data[0];
       existingPoints = existing?.points ?? null;
       existingId = existing?.id ?? null;

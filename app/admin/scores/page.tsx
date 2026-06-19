@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '@/amplify/data/resource';
-import { GAME_STATE_ID, compareTeamOrder, scoreId } from '@/app/lib/constants';
+import { GAME_STATE_ID, compareTeamOrder, listAll, scoreId } from '@/app/lib/constants';
 import ScoreGrid from '@/app/components/ScoreGrid';
 import QuickEntryDrawer from '@/app/components/QuickEntryDrawer';
 
@@ -11,6 +11,31 @@ type Team = Schema['Team']['type'];
 type Score = Schema['Score']['type'];
 
 const client = generateClient<Schema>({ authMode: 'userPool' });
+
+/**
+ * Fire-and-forget: after a full load we delete any duplicate Score records (same
+ * teamId+questionNumber), keeping the one with the latest updatedAt. The scoreMap
+ * memo already hides duplicates in the UI; this cleans them from the DB over time.
+ */
+function healDuplicates(all: Score[]) {
+  const byKey = new Map<string, Score[]>();
+  for (const s of all) {
+    const k = `${s.teamId}#${s.questionNumber}`;
+    let arr = byKey.get(k);
+    if (!arr) { arr = []; byKey.set(k, arr); }
+    arr.push(s);
+  }
+  for (const recs of byKey.values()) {
+    if (recs.length < 2) continue;
+    // keep the latest, delete the rest
+    const sorted = [...recs].sort(
+      (a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')
+    );
+    sorted.slice(1).forEach((s) => {
+      void client.models.Score.delete({ id: s.id }, { authMode: 'userPool' });
+    });
+  }
+}
 
 export default function AdminScoresPage() {
   const [teams, setTeams] = useState<Team[]>([]);
@@ -23,6 +48,10 @@ export default function AdminScoresPage() {
   const [quickEntryOpen, setQuickEntryOpen] = useState(false);
   const [recentEntry, setRecentEntry] = useState<{ teamId: string; points: number } | null>(null);
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Keeps a stable ref to scoreMap so optimistic saveScore can read it without deps
+  const scoreMapRef = useRef<Map<string, Map<number, Score>>>(new Map());
+  // Timestamp of the last entry — used to suppress the background poll while typing
+  const lastEntryRef = useRef<number>(0);
 
   // Clear the advance timer on unmount to avoid setState on an unmounted component
   useEffect(() => () => {
@@ -35,6 +64,7 @@ export default function AdminScoresPage() {
   // Score lookup: teamId → (questionNumber → Score)
   // When duplicate records exist for the same (teamId, questionNumber), keep the
   // one with the latest updatedAt so the displayed value is deterministic.
+  // Also keep a ref in sync so saveScore can read it without stale-closure issues.
   const scoreMap = useMemo(() => {
     const map = new Map<string, Map<number, Score>>();
     for (const score of scores) {
@@ -50,6 +80,7 @@ export default function AdminScoresPage() {
     }
     return map;
   }, [scores]);
+  useEffect(() => { scoreMapRef.current = scoreMap; }, [scoreMap]);
 
   // Default selection to first team once the game is active
   useEffect(() => {
@@ -64,15 +95,16 @@ export default function AdminScoresPage() {
 
   const load = useCallback(async () => {
     try {
-      const [teamsRes, scoresRes, gameStateRes] = await Promise.all([
-        client.models.Team.list(),
-        client.models.Score.list(),
+      const [teamsAll, scoresAll, gameStateRes] = await Promise.all([
+        listAll((o) => client.models.Team.list(o)),
+        listAll((o) => client.models.Score.list(o)),
         client.models.GameState.get({ id: GAME_STATE_ID }),
       ]);
-      setTeams(teamsRes.data);
-      setScores(scoresRes.data);
+      setTeams(teamsAll);
+      setScores(scoresAll);
       setCurrentQuestion(gameStateRes.data?.currentQuestion ?? null);
       setError(null);
+      healDuplicates(scoresAll); // fire-and-forget background cleanup
     } catch {
       setError('Failed to load scores.');
     } finally {
@@ -83,7 +115,12 @@ export default function AdminScoresPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
-    const interval = setInterval(() => void load(), 5000);
+    // Poll every 5 s, but skip the full read while the admin is actively entering
+    // scores (last entry < 6 s ago) to prevent server reads from clobbering fresh
+    // optimistic values. The poll resumes once they pause.
+    const interval = setInterval(() => {
+      if (Date.now() - lastEntryRef.current > 6000) void load();
+    }, 5000);
     return () => clearInterval(interval);
   }, [load]);
 
@@ -173,46 +210,48 @@ export default function AdminScoresPage() {
     }
   }
 
-  // Upsert: read-before-write by (teamId, questionNumber) to prevent duplicates.
-  // Also heals any pre-existing duplicate records for the same cell.
+  // Optimistic upsert: update local state immediately, then fire exactly one network
+  // write. No round-trip read, no full reload — makes ~2 entries/sec feel instant.
+  // The scoreMap is authoritative (fully paginated) so we know the existing record.
   const saveScore = useCallback(
     async (teamId: string, questionNumber: number, points: number) => {
       setError(null);
+      const existing = scoreMapRef.current.get(teamId)?.get(questionNumber) ?? null;
+      const id = existing?.id ?? scoreId(teamId, questionNumber);
+      const now = new Date().toISOString();
+
+      // Apply optimistically to local state so the grid updates instantly
+      setScores((cur) => {
+        const next = cur.filter((s) => s.id !== id);
+        // Spread existing to preserve any Amplify-generated fields we don't touch
+        next.push({ ...(existing ?? {}), id, teamId, questionNumber, points, updatedAt: now } as Score);
+        return next;
+      });
+
       try {
-        const { data: existing } = await client.models.Score.list({
-          filter: { teamId: { eq: teamId }, questionNumber: { eq: questionNumber } },
-          authMode: 'userPool',
-        });
-        if (existing.length > 0) {
-          await client.models.Score.update(
-            { id: existing[0].id, points },
-            { authMode: 'userPool' }
-          );
-          // Delete any extras to heal pre-existing duplicates
-          await Promise.all(
-            existing.slice(1).map((s) =>
-              client.models.Score.delete({ id: s.id }, { authMode: 'userPool' })
-            )
-          );
+        if (existing) {
+          await client.models.Score.update({ id, points }, { authMode: 'userPool' });
         } else {
           const { errors } = await client.models.Score.create(
-            { id: scoreId(teamId, questionNumber), teamId, questionNumber, points },
+            { id, teamId, questionNumber, points },
             { authMode: 'userPool' }
           );
           if (errors?.length) {
-            // Lost a concurrent create race — record exists now; update it
-            await client.models.Score.update(
-              { id: scoreId(teamId, questionNumber), points },
-              { authMode: 'userPool' }
-            );
+            // Deterministic id already exists (concurrent race) — update instead
+            await client.models.Score.update({ id, points }, { authMode: 'userPool' });
           }
         }
-        await load();
       } catch {
         setError('Failed to save score.');
+        // Roll back optimistic entry on network failure
+        setScores((cur) => {
+          const next = cur.filter((s) => s.id !== id);
+          if (existing) next.push(existing);
+          return next;
+        });
       }
     },
-    [load]
+    [] // no deps needed — reads scoreMapRef (stable ref) and writes via setScores updater fn
   );
 
   // Shared entry helper used by keyboard shortcuts (grid) and quick-entry drawer:
@@ -220,6 +259,7 @@ export default function AdminScoresPage() {
   const enterScoreAndAdvance = useCallback(
     (teamId: string, points: number) => {
       if (currentQuestion === null) return;
+      lastEntryRef.current = Date.now(); // suppress background poll while entering
       void saveScore(teamId, currentQuestion, points);
       // Flash confirmation for ~450 ms before advancing
       setRecentEntry({ teamId, points });
@@ -230,7 +270,7 @@ export default function AdminScoresPage() {
         advanceTimerRef.current = null;
       }, 450);
     },
-    [currentQuestion, saveScore, selectNext]
+    [currentQuestion, saveScore, selectNext] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const handleScoreDelete = useCallback(
