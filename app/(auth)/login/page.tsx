@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { Authenticator, useAuthenticator } from '@aws-amplify/ui-react';
 
@@ -56,10 +57,13 @@ export default function LoginPage() {
         <p className="mt-1 text-sm text-gray-500">Scorekeeper &amp; Admin Login</p>
       </div>
 
-      <Authenticator formFields={formFields}>{() => <RedirectOnAuth />}</Authenticator>
+      {/* hideSignUp: scorekeepers onboard via QR scan, not self-signup */}
+      <Authenticator formFields={formFields} hideSignUp>{() => <RedirectOnAuth />}</Authenticator>
 
       <p className="mt-6 max-w-xs text-center text-sm text-gray-500">
-        Viewers don&apos;t need to log in — go to the homepage.
+        Scorekeepers: scan your QR code to sign in.
+        Viewers don&apos;t need to log in — go to the{' '}
+        <Link href="/" className="text-indigo-600 underline">homepage</Link>.
       </p>
     </main>
   );

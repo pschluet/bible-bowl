@@ -51,6 +51,21 @@ export async function listAll<T>(
 }
 
 /**
+ * Formats a team's display label for use in <option> elements.
+ * Appends the human-readable group type when available.
+ * Example: "Faith Community — Pre-Teen"
+ */
+export function teamOptionLabel(team: {
+  name: string;
+  groupType?: string | null;
+}): string {
+  if (team.groupType && team.groupType in GROUP_LABELS) {
+    return `${team.name} — ${GROUP_LABELS[team.groupType as GroupType]}`;
+  }
+  return team.name;
+}
+
+/**
  * Comparator for sorting teams by admin-assigned display order.
  * Teams without an explicit order (null/undefined) sort after those with one,
  * with alphabetical name as the tiebreaker.

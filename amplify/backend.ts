@@ -36,6 +36,10 @@ cognitoAdminUser.addToPrincipalPolicy(
       'cognito-idp:AdminSetUserPassword',
       'cognito-idp:AdminGetUser',
       'cognito-idp:ListUsers',
+      // QR onboarding: enumerate scorekeepers for End Game sign-out
+      'cognito-idp:ListUsersInGroup',
+      // End Game: immediately revoke all scorekeeper sessions
+      'cognito-idp:AdminUserGlobalSignOut',
     ],
     resources: [backend.auth.resources.userPool.userPoolArn],
   })
@@ -44,6 +48,38 @@ cognitoAdminUser.addToPrincipalPolicy(
 const accessKey = new iam.CfnAccessKey(adminStack, 'CognitoAdminAccessKey', {
   userName: cognitoAdminUser.userName,
   status: 'Active',
+});
+
+// ── User pool / app-client overrides for QR-code passwordless onboarding ──
+
+const { cfnUserPool, cfnUserPoolClient } = backend.auth.resources.cfnResources;
+
+/**
+ * Enable USER_PASSWORD_AUTH so /scan can call Amplify signIn() with a
+ * server-minted one-time password immediately after the token exchange.
+ * Keep SRP (default login) and refresh-token auth as well.
+ */
+cfnUserPoolClient.addPropertyOverride('ExplicitAuthFlows', [
+  'ALLOW_USER_SRP_AUTH',
+  'ALLOW_REFRESH_TOKEN_AUTH',
+  'ALLOW_USER_PASSWORD_AUTH',
+]);
+
+/**
+ * 7-hour refresh token — covers a ~3-hour Bible Bowl event with margin.
+ * Amplify silently refreshes the short-lived access token in the background;
+ * scorekeepers stay signed in for the whole event after a single QR scan.
+ */
+cfnUserPoolClient.addPropertyOverride('RefreshTokenValidity', 7);
+cfnUserPoolClient.addPropertyOverride('TokenValidityUnits', { RefreshToken: 'hours' });
+
+/**
+ * Disable self-signup. Scorekeepers onboard via QR (the exchange route creates
+ * their Cognito user lazily). Admins are seeded via `npm run seed:admin` or
+ * created by an existing admin on the Users page.
+ */
+cfnUserPool.addPropertyOverride('AdminCreateUserConfig', {
+  AllowAdminCreateUserOnly: true,
 });
 
 // Bake credentials into amplify_outputs.json so the SSR Lambda can read them

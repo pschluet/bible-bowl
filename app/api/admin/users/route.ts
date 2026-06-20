@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import {
-  CognitoIdentityProviderClient,
   AdminCreateUserCommand,
   AdminAddUserToGroupCommand,
   AdminRemoveUserFromGroupCommand,
@@ -13,22 +12,9 @@ import { cookies } from 'next/headers';
 import outputs from '@/amplify_outputs.json';
 import type { Schema } from '@/amplify/data/resource';
 import { getServerSession } from '@/app/lib/auth';
+import { makeCognitoClient, USER_POOL_ID } from '@/app/lib/cognito';
 
 type Role = 'Admins' | 'Scorekeepers';
-
-function makeCognitoClient() {
-  const serverOnly = (outputs as { custom?: { serverOnly?: Record<string, string> } }).custom
-    ?.serverOnly;
-  const accessKeyId = serverOnly?.cognitoAdminAccessKeyId;
-  const secretAccessKey = serverOnly?.cognitoAdminSecretAccessKey;
-  if (!accessKeyId || !secretAccessKey) {
-    throw new Error('Missing serverOnly.cognitoAdminAccessKeyId or cognitoAdminSecretAccessKey in amplify_outputs.json');
-  }
-  return new CognitoIdentityProviderClient({
-    region: outputs.auth.aws_region,
-    credentials: { accessKeyId, secretAccessKey },
-  });
-}
 
 function attr(user: UserType, name: string): string {
   return user.Attributes?.find((a) => a.Name === name)?.Value ?? '';
@@ -43,7 +29,7 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  let cognitoClient: CognitoIdentityProviderClient;
+  let cognitoClient: ReturnType<typeof makeCognitoClient>;
   try {
     cognitoClient = makeCognitoClient();
   } catch (err) {
@@ -57,7 +43,7 @@ export async function GET() {
   do {
     const res = await cognitoClient.send(
       new ListUsersCommand({
-        UserPoolId: outputs.auth.user_pool_id,
+        UserPoolId: USER_POOL_ID,
         PaginationToken: paginationToken,
       })
     );
@@ -77,11 +63,11 @@ export async function GET() {
       try {
         const groupsRes = await cognitoClient.send(
           new AdminListGroupsForUserCommand({
-            UserPoolId: outputs.auth.user_pool_id,
+            UserPoolId: USER_POOL_ID,
             Username: username,
           })
         );
-        groups = (groupsRes.Groups ?? []).map((g) => g.GroupName ?? '').filter(Boolean);
+        groups = (groupsRes.Groups ?? []).map((g: { GroupName?: string }) => g.GroupName ?? '').filter(Boolean);
       } catch (err) {
         console.error(`Failed to fetch groups for user ${username}:`, err);
       }
@@ -118,7 +104,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "role must be 'Admins' or 'Scorekeepers'" }, { status: 400 });
   }
 
-  let cognitoClient: CognitoIdentityProviderClient;
+  let cognitoClient: ReturnType<typeof makeCognitoClient>;
   try {
     cognitoClient = makeCognitoClient();
   } catch (err) {
@@ -133,7 +119,7 @@ export async function PATCH(request: Request) {
     await cognitoClient
       .send(
         new AdminRemoveUserFromGroupCommand({
-          UserPoolId: outputs.auth.user_pool_id,
+          UserPoolId: USER_POOL_ID,
           Username: username,
           GroupName: otherRole,
         })
@@ -144,7 +130,7 @@ export async function PATCH(request: Request) {
 
     await cognitoClient.send(
       new AdminAddUserToGroupCommand({
-        UserPoolId: outputs.auth.user_pool_id,
+        UserPoolId: USER_POOL_ID,
         Username: username,
         GroupName: role as Role,
       })
@@ -182,7 +168,8 @@ export async function PATCH(request: Request) {
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/admin/users — create a new user (unchanged)
+// POST /api/admin/users — create a new Admin user
+// Scorekeepers are onboarded via QR scan (/api/scorekeeper/exchange).
 // ---------------------------------------------------------------------------
 export async function POST(request: Request) {
   const session = await getServerSession();
@@ -190,23 +177,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  let body: { email?: string; role?: string; teamId?: string };
+  let body: { email?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { email, role, teamId } = body;
+  const { email } = body;
 
   if (!email || typeof email !== 'string') {
     return NextResponse.json({ error: 'email is required' }, { status: 400 });
   }
-  if (role !== 'Admins' && role !== 'Scorekeepers') {
-    return NextResponse.json({ error: "role must be 'Admins' or 'Scorekeepers'" }, { status: 400 });
-  }
 
-  let cognitoClient: CognitoIdentityProviderClient;
+  let cognitoClient: ReturnType<typeof makeCognitoClient>;
   try {
     cognitoClient = makeCognitoClient();
   } catch (err) {
@@ -217,7 +201,7 @@ export async function POST(request: Request) {
   try {
     await cognitoClient.send(
       new AdminCreateUserCommand({
-        UserPoolId: outputs.auth.user_pool_id,
+        UserPoolId: USER_POOL_ID,
         Username: email,
         UserAttributes: [
           { Name: 'email', Value: email },
@@ -228,9 +212,9 @@ export async function POST(request: Request) {
 
     await cognitoClient.send(
       new AdminAddUserToGroupCommand({
-        UserPoolId: outputs.auth.user_pool_id,
+        UserPoolId: USER_POOL_ID,
         Username: email,
-        GroupName: role as Role,
+        GroupName: 'Admins',
       })
     );
   } catch (err: unknown) {
@@ -240,23 +224,6 @@ export async function POST(request: Request) {
     }
     console.error('Failed to create Cognito user:', err);
     return NextResponse.json({ error: 'Failed to create user' }, { status: 500 });
-  }
-
-  if (role === 'Scorekeepers' && teamId) {
-    try {
-      const dataClient = generateServerClientUsingCookies<Schema>({
-        config: outputs,
-        cookies,
-        authMode: 'apiKey',
-      });
-      await dataClient.models.Team.update({ id: teamId, scorekeeperEmail: email });
-    } catch (err: unknown) {
-      console.error('User created but failed to assign team:', err);
-      return NextResponse.json(
-        { error: 'User created, but failed to assign team' },
-        { status: 500 }
-      );
-    }
   }
 
   return NextResponse.json({ success: true });
