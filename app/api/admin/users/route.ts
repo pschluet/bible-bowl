@@ -17,12 +17,12 @@ import { getServerSession } from '@/app/lib/auth';
 type Role = 'Admins' | 'Scorekeepers';
 
 function makeCognitoClient() {
-  const accessKeyId = (outputs as { custom?: Record<string, string> }).custom
-    ?.cognitoAdminAccessKeyId;
-  const secretAccessKey = (outputs as { custom?: Record<string, string> }).custom
-    ?.cognitoAdminSecretAccessKey;
+  const serverOnly = (outputs as { custom?: { serverOnly?: Record<string, string> } }).custom
+    ?.serverOnly;
+  const accessKeyId = serverOnly?.cognitoAdminAccessKeyId;
+  const secretAccessKey = serverOnly?.cognitoAdminSecretAccessKey;
   if (!accessKeyId || !secretAccessKey) {
-    throw new Error('Missing cognitoAdminAccessKeyId or cognitoAdminSecretAccessKey in amplify_outputs.json');
+    throw new Error('Missing serverOnly.cognitoAdminAccessKeyId or cognitoAdminSecretAccessKey in amplify_outputs.json');
   }
   return new CognitoIdentityProviderClient({
     region: outputs.auth.aws_region,

@@ -3,6 +3,11 @@ import { Geist, Geist_Mono } from 'next/font/google';
 import '@aws-amplify/ui-react/styles.css';
 import './globals.css';
 import ConfigureAmplify from '@/app/amplify-config';
+import outputs from '@/amplify_outputs.json';
+
+// Strip server-only secrets from the config before passing to the client component.
+const { serverOnly: _serverOnly, ...publicCustom } = (outputs.custom ?? {}) as Record<string, unknown>;
+const publicOutputs = { ...(outputs as Record<string, unknown>), custom: publicCustom };
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -27,7 +32,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-gray-50 text-gray-900">
-        <ConfigureAmplify />
+        <ConfigureAmplify config={publicOutputs} />
         {children}
       </body>
     </html>

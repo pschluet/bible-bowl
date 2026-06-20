@@ -2,7 +2,6 @@ import { defineBackend } from '@aws-amplify/backend';
 import { auth } from './auth/resource';
 import { data } from './data/resource';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import * as cdk from 'aws-cdk-lib';
 
 const backend = defineBackend({ auth, data });
 
@@ -47,31 +46,14 @@ const accessKey = new iam.CfnAccessKey(adminStack, 'CognitoAdminAccessKey', {
   status: 'Active',
 });
 
-/**
- * CloudFormation outputs — after the first deployment, run:
- *   aws cloudformation describe-stacks \
- *     --stack-name amplify-<appId>-<branch>-BibleBowlAdminStack \
- *     --query 'Stacks[0].Outputs'
- *
- * Then set the values as environment variables in the Amplify Console:
- *   COGNITO_ADMIN_ACCESS_KEY_ID  → CognitoAdminAccessKeyId output value
- *   COGNITO_ADMIN_SECRET_ACCESS_KEY → CognitoAdminSecretKey output value
- *
- * These outputs are only visible to IAM principals with CloudFormation access.
- */
-new cdk.CfnOutput(adminStack, 'CognitoAdminAccessKeyId', {
-  value: accessKey.ref,
-});
-
-new cdk.CfnOutput(adminStack, 'CognitoAdminSecretKey', {
-  value: accessKey.attrSecretAccessKey,
-});
-
 // Bake credentials into amplify_outputs.json so the SSR Lambda can read them
-// at runtime without relying on Amplify Hosting env var injection.
+// at runtime. The serverOnly block is stripped before the config reaches
+// the browser (see app/layout.tsx), so these never appear in client bundles.
 backend.addOutput({
   custom: {
-    cognitoAdminAccessKeyId: accessKey.ref,
-    cognitoAdminSecretAccessKey: accessKey.attrSecretAccessKey,
+    serverOnly: { // not exposed to the browser
+      cognitoAdminAccessKeyId: accessKey.ref,
+      cognitoAdminSecretAccessKey: accessKey.attrSecretAccessKey,
+    },
   },
 });

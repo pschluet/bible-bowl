@@ -1,14 +1,12 @@
 'use client';
 
 import { Amplify } from 'aws-amplify';
-import outputs from '@/amplify_outputs.json';
 
-// Configure runs at module-eval time on both server (SSR) and client so that
-// `generateClient()` calls in page modules never see an unconfigured singleton.
-// Server-side Amplify operations still use `createServerRunner` (amplify-server.ts)
-// independently; this call does not conflict with it.
-Amplify.configure(outputs, { ssr: true });
-
-export default function ConfigureAmplify() {
+// The config prop is built server-side in layout.tsx with the `custom` block
+// (which contains IAM credentials) stripped out, so secrets never reach the
+// client bundle. generateClient() handles being called before configure() by
+// listening for the Hub configure event and rebuilding then.
+export default function ConfigureAmplify({ config }: { config: Record<string, unknown> }) {
+  Amplify.configure(config as never, { ssr: true });
   return null;
 }
