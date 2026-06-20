@@ -1,112 +1,121 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import type { Schema } from '@/amplify/data/resource';
-import { GAME_STATE_ID } from '@/app/lib/constants';
+import { subscribeLive } from '@/app/lib/liveQuery';
 import TeamPicker from '@/app/components/TeamPicker';
 import ScoreEntry from '@/app/components/ScoreEntry';
 
 type Team = Schema['Team']['type'];
-
-const POLL_MS = 5000;
+type Score = Schema['Score']['type'];
+type GameState = Schema['GameState']['type'];
 
 const client = generateClient<Schema>({ authMode: 'userPool' });
 
 export default function ScorekeeperPage() {
-  const [loading, setLoading] = useState(true);
   const [claiming, setClaiming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const claimingRef = useRef(false);
 
-  const [myTeam, setMyTeam] = useState<Team | null>(null);
-  const [unclaimedTeams, setUnclaimedTeams] = useState<Team[]>([]);
-  const [currentQuestion, setCurrentQuestion] = useState<number | null>(null);
-  const [existingScore, setExistingScore] = useState<number | null>(null);
-  const [scoreId, setScoreId] = useState<string | null>(null);
+  // Raw stream state
+  const [userSub, setUserSub] = useState<string | null>(null);
+  const [allTeams, setAllTeams] = useState<Team[]>([]);
+  const [gameStateItems, setGameStateItems] = useState<GameState[]>([]);
+  const [teamScores, setTeamScores] = useState<Score[]>([]);
 
-  const load = useCallback(async (silent = false) => {
-    if (!silent) {
-      setLoading(true);
-      setError(null);
-    }
+  // Track when each stream has completed its initial sync; loading derived directly
+  const [teamsSynced, setTeamsSynced] = useState(false);
+  const [gameStateSynced, setGameStateSynced] = useState(false);
+  const loading = !teamsSynced || !gameStateSynced;
 
-    const session = await fetchAuthSession();
-    const userSub = (session.tokens?.accessToken?.payload.sub as string | undefined) ?? null;
+  // Derived state
+  const myTeam = useMemo(
+    () => allTeams.find((t) => t.scorekeeperUserId === userSub) ?? null,
+    [allTeams, userSub]
+  );
+  const unclaimedTeams = useMemo(() => allTeams.filter((t) => !t.scorekeeperUserId), [allTeams]);
+  const currentQuestion = useMemo(
+    () => gameStateItems[0]?.currentQuestion ?? null,
+    [gameStateItems]
+  );
+  const existingScore = useMemo(() => {
+    if (!myTeam || currentQuestion === null) return null;
+    return teamScores.find((s) => s.questionNumber === currentQuestion)?.points ?? null;
+  }, [myTeam, currentQuestion, teamScores]);
+  const existingScoreId = useMemo(() => {
+    if (!myTeam || currentQuestion === null) return null;
+    return teamScores.find((s) => s.questionNumber === currentQuestion)?.id ?? null;
+  }, [myTeam, currentQuestion, teamScores]);
 
-    const [teamsRes, gameStateRes] = await Promise.all([
-      client.models.Team.list(),
-      client.models.GameState.get({ id: GAME_STATE_ID }),
-    ]);
+  // Primitive dep for the Score subscription so it only restarts when the team id changes
+  const myTeamId = myTeam?.id ?? null;
 
-    const teams = teamsRes.data;
-    const claimed = teams.find((t) => t.scorekeeperUserId === userSub) ?? null;
-    const question = gameStateRes.data?.currentQuestion ?? null;
-
-    // Fetch the existing score for this question before touching state, so that
-    // all setState calls below are in one synchronous block. React batches them
-    // into a single render, ensuring currentQuestion and existingScore are never
-    // seen in an inconsistent intermediate state (which would cause ScoreEntry to
-    // remount with a stale existingScore before it's cleared).
-    let existingPoints: number | null = null;
-    let existingId: string | null = null;
-    if (claimed && question !== null) {
-      // Use the secondary index rather than a scan-and-filter so the lookup is reliable
-      // regardless of how many total Score records exist in the table.
-      const scoresRes = await client.models.Score.listScoreByTeamIdAndQuestionNumber(
-        { teamId: claimed.id, questionNumber: { eq: question } }
-      );
-      const existing = scoresRes.data[0];
-      existingPoints = existing?.points ?? null;
-      existingId = existing?.id ?? null;
-    }
-
-    // All state updates in one synchronous block → single React render.
-    setMyTeam(claimed);
-    setCurrentQuestion(question);
-    setUnclaimedTeams(teams.filter((t) => !t.scorekeeperUserId));
-    setExistingScore(existingPoints);
-    setScoreId(existingId);
-    if (!silent) setLoading(false);
+  // Fetch userSub once on mount
+  useEffect(() => {
+    void fetchAuthSession().then((session) => {
+      setUserSub((session.tokens?.accessToken?.payload.sub as string | undefined) ?? null);
+    });
   }, []);
 
+  // Team + GameState streams — set loading false once both initial syncs complete
   useEffect(() => {
-    // Initial load + poll every 5 s so question advances without a manual refresh.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-    const interval = setInterval(() => {
-      // Skip the poll while a claim is in flight to avoid overwriting optimistic state.
-      if (!claimingRef.current) void load(true);
-    }, POLL_MS);
-    return () => clearInterval(interval);
-  }, [load]);
+    const unsubTeam = subscribeLive(
+      () => client.models.Team.observeQuery({ authMode: 'userPool' }),
+      ({ items, isSynced }) => {
+        setAllTeams(items);
+        if (isSynced) setTeamsSynced(true);
+      },
+    );
+    const unsubGs = subscribeLive(
+      () => client.models.GameState.observeQuery({ authMode: 'userPool' }),
+      ({ items, isSynced }) => {
+        setGameStateItems(items);
+        if (isSynced) setGameStateSynced(true);
+      },
+    );
+    return () => {
+      unsubTeam();
+      unsubGs();
+    };
+  }, []);
 
-  const handleClaim = useCallback(
-    async (teamId: string) => {
-      claimingRef.current = true;
-      setClaiming(true);
-      setError(null);
-      try {
-        const res = await fetch('/api/teams/claim', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ teamId }),
-        });
-        if (!res.ok) {
-          setError('Could not claim team. Please try again.');
-          return;
-        }
-        await load();
-      } catch {
+  // Score stream — filtered to myTeam, reopens when the team changes
+  useEffect(() => {
+    if (!myTeamId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTeamScores([]);
+      return;
+    }
+    return subscribeLive(
+      () =>
+        client.models.Score.observeQuery({
+          authMode: 'userPool',
+          filter: { teamId: { eq: myTeamId } },
+        }),
+      ({ items }) => setTeamScores(items),
+    );
+  }, [myTeamId]);
+
+  const handleClaim = useCallback(async (teamId: string) => {
+    setClaiming(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/teams/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teamId }),
+      });
+      if (!res.ok) {
         setError('Could not claim team. Please try again.');
-      } finally {
-        claimingRef.current = false;
-        setClaiming(false);
       }
-    },
-    [load]
-  );
+      // Team stream delivers the updated scorekeeperUserId — no reload needed
+    } catch {
+      setError('Could not claim team. Please try again.');
+    } finally {
+      setClaiming(false);
+    }
+  }, []);
 
   if (loading) {
     return (
@@ -131,7 +140,7 @@ export default function ScorekeeperPage() {
       team={myTeam}
       currentQuestion={currentQuestion}
       existingScore={existingScore}
-      scoreId={scoreId}
+      scoreId={existingScoreId}
     />
   );
 }

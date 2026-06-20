@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '@/amplify/data/resource';
 import { compareTeamOrder, GROUP_LABELS, GROUP_TYPES, type GroupType } from '@/app/lib/constants';
-import GroupPill from '@/app/components/GroupPill';
+import { subscribeLive } from '@/app/lib/liveQuery';
 
 type Team = Schema['Team']['type'];
 
@@ -22,24 +22,18 @@ export default function AdminTeamsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
 
-  const load = useCallback(async () => {
-    try {
-      const res = await client.models.Team.list();
-      setTeams([...res.data].sort(compareTeamOrder));
-      setError(null);
-    } catch {
-      setError('Failed to load teams.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // Sorted teams derived from the live stream
+  const sortedTeams = useMemo(() => [...teams].sort(compareTeamOrder), [teams]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-    const interval = setInterval(() => void load(), 10000);
-    return () => clearInterval(interval);
-  }, [load]);
+    return subscribeLive(
+      () => client.models.Team.observeQuery({ authMode: 'userPool' }),
+      ({ items, isSynced }) => {
+        setTeams(items);
+        if (isSynced) setLoading(false);
+      },
+    );
+  }, []);
 
   async function handleAdd() {
     const name = newName.trim();
@@ -50,7 +44,7 @@ export default function AdminTeamsPage() {
       const displayOrder = teams.reduce((m, t) => Math.max(m, t.displayOrder ?? -1), -1) + 1;
       await client.models.Team.create({ name, groupType: newGroup, displayOrder }, { authMode: 'userPool' });
       setNewName('');
-      await load();
+      // Stream delivers the new team — no reload needed
     } catch {
       setError('Failed to add team.');
     } finally {
@@ -65,7 +59,7 @@ export default function AdminTeamsPage() {
     setError(null);
     try {
       await client.models.Team.update({ id, name }, { authMode: 'userPool' });
-      await load();
+      // Stream delivers the update — no reload needed
     } catch {
       setError('Failed to update team.');
     }
@@ -75,7 +69,7 @@ export default function AdminTeamsPage() {
     setError(null);
     try {
       await client.models.Team.update({ id, groupType }, { authMode: 'userPool' });
-      await load();
+      // Stream delivers the update — no reload needed
     } catch {
       setError('Failed to update group.');
     }
@@ -86,7 +80,7 @@ export default function AdminTeamsPage() {
     setError(null);
     try {
       await client.models.Team.delete({ id: team.id }, { authMode: 'userPool' });
-      await load();
+      // Stream delivers the delete — no reload needed
     } catch {
       setError('Failed to delete team.');
     }
@@ -99,7 +93,7 @@ export default function AdminTeamsPage() {
         { id, scorekeeperUserId: null, scorekeeperEmail: null },
         { authMode: 'userPool' }
       );
-      await load();
+      // Stream delivers the update — no reload needed
     } catch {
       setError('Failed to remove scorekeeper.');
     }
@@ -107,33 +101,43 @@ export default function AdminTeamsPage() {
 
   async function handleMove(index: number, direction: 'up' | 'down') {
     const swapIndex = direction === 'up' ? index - 1 : index + 1;
-    if (swapIndex < 0 || swapIndex >= teams.length) return;
+    if (swapIndex < 0 || swapIndex >= sortedTeams.length) return;
     setError(null);
 
-    // Build the new order by swapping the two teams
-    const reordered = [...teams];
-    [reordered[index], reordered[swapIndex]] = [reordered[swapIndex], reordered[index]];
+    const teamA = sortedTeams[index];
+    const teamB = sortedTeams[swapIndex];
 
-    // Optimistically update UI before the writes complete
-    setTeams(reordered);
+    // Optimistic: swap display orders in local state so the UI updates instantly
+    setTeams(cur =>
+      cur.map(t => {
+        if (t.id === teamA.id) return { ...t, displayOrder: swapIndex };
+        if (t.id === teamB.id) return { ...t, displayOrder: index };
+        return t;
+      })
+    );
 
     try {
-      // Persist dense sequential displayOrder values for only the two swapped rows
       await Promise.all([
         client.models.Team.update(
-          { id: reordered[index].id, displayOrder: index },
+          { id: teamA.id, displayOrder: swapIndex },
           { authMode: 'userPool' }
         ),
         client.models.Team.update(
-          { id: reordered[swapIndex].id, displayOrder: swapIndex },
+          { id: teamB.id, displayOrder: index },
           { authMode: 'userPool' }
         ),
       ]);
-      // Full reload normalises any remaining null displayOrders
-      await load();
+      // Stream delivers confirmed updates — no reload needed
     } catch {
       setError('Failed to reorder teams.');
-      await load(); // restore on failure
+      // Revert optimistic state
+      setTeams(cur =>
+        cur.map(t => {
+          if (t.id === teamA.id) return { ...t, displayOrder: index };
+          if (t.id === teamB.id) return { ...t, displayOrder: swapIndex };
+          return t;
+        })
+      );
     }
   }
 
@@ -180,13 +184,13 @@ export default function AdminTeamsPage() {
         <div className="flex items-center justify-center py-20">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-indigo-600" />
         </div>
-      ) : teams.length === 0 ? (
+      ) : sortedTeams.length === 0 ? (
         <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-gray-500">
           No teams yet.
         </div>
       ) : (
         <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
-          {teams.map((team, index) => (
+          {sortedTeams.map((team, index) => (
             <li key={team.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
               {/* Up/down reorder buttons */}
               <div className="flex flex-col">
@@ -202,7 +206,7 @@ export default function AdminTeamsPage() {
                 <button
                   type="button"
                   onClick={() => void handleMove(index, 'down')}
-                  disabled={index === teams.length - 1}
+                  disabled={index === sortedTeams.length - 1}
                   className="text-gray-400 hover:text-gray-700 disabled:invisible"
                   aria-label="Move down"
                 >

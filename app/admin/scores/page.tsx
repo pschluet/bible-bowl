@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '@/amplify/data/resource';
-import { GAME_STATE_ID, compareTeamOrder, listAll, scoreId } from '@/app/lib/constants';
+import { GAME_STATE_ID, compareTeamOrder, scoreId } from '@/app/lib/constants';
+import { subscribeLive } from '@/app/lib/liveQuery';
 import ScoreGrid from '@/app/components/ScoreGrid';
 import QuickEntryDrawer from '@/app/components/QuickEntryDrawer';
 
@@ -39,9 +40,18 @@ function healDuplicates(all: Score[]) {
 
 export default function AdminScoresPage() {
   const [teams, setTeams] = useState<Team[]>([]);
-  const [scores, setScores] = useState<Score[]>([]);
+  // Separate sources for score state to avoid flicker when a concurrent
+  // subscription event arrives before the server echo of an optimistic write.
+  // streamedScores: authoritative collection from observeQuery
+  // optimisticScores: pending local writes not yet confirmed by the stream
+  const [streamedScores, setStreamedScores] = useState<Score[]>([]);
+  const [optimisticScores, setOptimisticScores] = useState<Score[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Gate loading on both streams completing their initial sync so the grid
+  // paints fully populated (no dashes-then-fill as score pages arrive).
+  const [teamsSynced, setTeamsSynced] = useState(false);
+  const [scoresSynced, setScoresSynced] = useState(false);
+  const loading = !teamsSynced || !scoresSynced;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
@@ -50,8 +60,39 @@ export default function AdminScoresPage() {
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Keeps a stable ref to scoreMap so optimistic saveScore can read it without deps
   const scoreMapRef = useRef<Map<string, Map<number, Score>>>(new Map());
-  // Timestamp of the last entry — used to suppress the background poll while typing
-  const lastEntryRef = useRef<number>(0);
+  // Tracks whether healDuplicates has run for this session
+  const healedRef = useRef(false);
+
+  // Merged scores: stream + optimistic overlay (optimistic wins for same id if newer).
+  // This preserves optimistic writes during the ~100–300 ms before the server echo
+  // arrives, even if another subscription event fires in that window.
+  const scores = useMemo((): Score[] => {
+    if (optimisticScores.length === 0) return streamedScores;
+    const map = new Map(streamedScores.map((s) => [s.id, s]));
+    for (const opt of optimisticScores) {
+      const streamed = map.get(opt.id);
+      if (!streamed || (opt.updatedAt ?? '') > (streamed.updatedAt ?? '')) {
+        map.set(opt.id, opt);
+      }
+    }
+    return [...map.values()];
+  }, [streamedScores, optimisticScores]);
+
+  // When the stream delivers a confirmed version of an optimistic entry, prune it
+  // so the stream's authoritative value fully takes over.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOptimisticScores((prev) => {
+      if (prev.length === 0) return prev;
+      const streamMap = new Map(streamedScores.map((s) => [s.id, s]));
+      const next = prev.filter((opt) => {
+        const s = streamMap.get(opt.id);
+        // Keep optimistic entry if stream doesn't have it yet or ours is still newer
+        return !s || (opt.updatedAt ?? '') > (s.updatedAt ?? '');
+      });
+      return next.length === prev.length ? prev : next; // skip re-render if nothing changed
+    });
+  }, [streamedScores]);
 
   // Clear the advance timer on unmount to avoid setState on an unmounted component
   useEffect(() => () => {
@@ -93,36 +134,43 @@ export default function AdminScoresPage() {
     }
   }, [currentQuestion, sortedTeams]);
 
-  const load = useCallback(async () => {
-    try {
-      const [teamsAll, scoresAll, gameStateRes] = await Promise.all([
-        listAll((o) => client.models.Team.list(o)),
-        listAll((o) => client.models.Score.list(o)),
-        client.models.GameState.get({ id: GAME_STATE_ID }),
-      ]);
-      setTeams(teamsAll);
-      setScores(scoresAll);
-      setCurrentQuestion(gameStateRes.data?.currentQuestion ?? null);
-      setError(null);
-      healDuplicates(scoresAll); // fire-and-forget background cleanup
-    } catch {
-      setError('Failed to load scores.');
-    } finally {
-      setLoading(false);
-    }
+  // Team stream
+  useEffect(() => {
+    return subscribeLive(
+      () => client.models.Team.observeQuery({ authMode: 'userPool' }),
+      ({ items, isSynced }) => {
+        setTeams(items);
+        if (isSynced) setTeamsSynced(true);
+      },
+    );
   }, []);
 
+  // Score stream — run healDuplicates once after the first full sync
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-    // Poll every 5 s, but skip the full read while the admin is actively entering
-    // scores (last entry < 6 s ago) to prevent server reads from clobbering fresh
-    // optimistic values. The poll resumes once they pause.
-    const interval = setInterval(() => {
-      if (Date.now() - lastEntryRef.current > 6000) void load();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [load]);
+    return subscribeLive(
+      () => client.models.Score.observeQuery({ authMode: 'userPool' }),
+      ({ items, isSynced }) => {
+        setStreamedScores(items);
+        if (isSynced) {
+          setScoresSynced(true);
+          if (!healedRef.current) {
+            healedRef.current = true;
+            healDuplicates(items); // fire-and-forget background DB cleanup
+          }
+        }
+      },
+    );
+  }, []);
+
+  // GameState stream
+  useEffect(() => {
+    return subscribeLive(
+      () => client.models.GameState.observeQuery({ authMode: 'userPool' }),
+      ({ items }) => {
+        setCurrentQuestion(items[0]?.currentQuestion ?? null);
+      },
+    );
+  }, []);
 
   // Selection helpers
   const selectTeam = useCallback((id: string) => setSelectedTeamId(id), []);
@@ -151,7 +199,7 @@ export default function AdminScoresPage() {
         { id: GAME_STATE_ID, currentQuestion: 1 },
         { authMode: 'userPool' }
       );
-      await load();
+      // Stream delivers the new GameState — no reload needed
     } catch {
       setError('Failed to initialize game.');
     } finally {
@@ -168,7 +216,7 @@ export default function AdminScoresPage() {
         { id: GAME_STATE_ID, currentQuestion: currentQuestion + 1 },
         { authMode: 'userPool' }
       );
-      await load();
+      // Stream delivers the update — no reload needed
     } catch {
       setError('Failed to advance question.');
     } finally {
@@ -202,7 +250,9 @@ export default function AdminScoresPage() {
       if (currentQuestion !== null) {
         await client.models.GameState.delete({ id: GAME_STATE_ID }, { authMode: 'userPool' });
       }
-      await load();
+      // Clear any pending optimistic overrides so the grid resets immediately
+      setOptimisticScores([]);
+      // Streams deliver the individual deletes — no full reload needed
     } catch {
       setError('Failed to reset the game.');
     } finally {
@@ -220,9 +270,10 @@ export default function AdminScoresPage() {
       const id = existing?.id ?? scoreId(teamId, questionNumber);
       const now = new Date().toISOString();
 
-      // Apply optimistically to local state so the grid updates instantly
-      setScores((cur) => {
-        const next = cur.filter((s) => s.id !== id);
+      // Apply optimistically: add to the overlay so the grid updates instantly.
+      // The cleanup effect removes it once the stream delivers the confirmed echo.
+      setOptimisticScores((prev) => {
+        const next = prev.filter((s) => s.id !== id);
         // Spread existing to preserve any Amplify-generated fields we don't touch
         next.push({ ...(existing ?? {}), id, teamId, questionNumber, points, updatedAt: now } as Score);
         return next;
@@ -243,15 +294,11 @@ export default function AdminScoresPage() {
         }
       } catch {
         setError('Failed to save score.');
-        // Roll back optimistic entry on network failure
-        setScores((cur) => {
-          const next = cur.filter((s) => s.id !== id);
-          if (existing) next.push(existing);
-          return next;
-        });
+        // Roll back: remove optimistic override; stream retains the old value
+        setOptimisticScores((prev) => prev.filter((s) => s.id !== id));
       }
     },
-    [] // no deps needed — reads scoreMapRef (stable ref) and writes via setScores updater fn
+    [] // no deps needed — reads scoreMapRef (stable ref) and writes via stable setters
   );
 
   // Shared entry helper used by keyboard shortcuts (grid) and quick-entry drawer:
@@ -259,7 +306,6 @@ export default function AdminScoresPage() {
   const enterScoreAndAdvance = useCallback(
     (teamId: string, points: number) => {
       if (currentQuestion === null) return;
-      lastEntryRef.current = Date.now(); // suppress background poll while entering
       void saveScore(teamId, currentQuestion, points);
       // Flash confirmation for ~450 ms before advancing
       setRecentEntry({ teamId, points });
@@ -270,7 +316,7 @@ export default function AdminScoresPage() {
         advanceTimerRef.current = null;
       }, 450);
     },
-    [currentQuestion, saveScore, selectNext] // eslint-disable-line react-hooks/exhaustive-deps
+    [currentQuestion, saveScore, selectNext]
   );
 
   const handleScoreDelete = useCallback(
@@ -278,12 +324,12 @@ export default function AdminScoresPage() {
       setError(null);
       try {
         await client.models.Score.delete({ id: existingId }, { authMode: 'userPool' });
-        await load();
+        // Stream delivers the delete — no reload needed
       } catch {
         setError('Failed to clear score.');
       }
     },
-    [load]
+    []
   );
 
   return (

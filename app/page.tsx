@@ -1,27 +1,34 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import type { Schema } from '@/amplify/data/resource';
-import { GAME_STATE_ID, listAll } from '@/app/lib/constants';
+import { subscribeLive } from '@/app/lib/liveQuery';
 import Link from 'next/link';
 import { QRCodeSVG } from 'qrcode.react';
 import Leaderboard, { type LeaderboardTeam, type ScoreHistoryEntry } from '@/app/components/Leaderboard';
 
 const FAVORITE_KEY = 'bb_favorite';
-const POLL_MS = 5000;
 const SITE_URL = 'https://bible.pauldev.io/';
 
 const client = generateClient<Schema>();
 
 export default function ViewerPage() {
-  const [teams, setTeams] = useState<LeaderboardTeam[]>([]);
-  const [currentQuestion, setCurrentQuestion] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
   const [favoriteTeamIds, setFavoriteTeamIds] = useState<Set<string>>(new Set());
   const [groups, setGroups] = useState<string[]>([]);
   const [qrExpanded, setQrExpanded] = useState(false);
+  const [teamsSynced, setTeamsSynced] = useState(false);
+  const [scoresSynced, setScoresSynced] = useState(false);
+  const loading = !teamsSynced || !scoresSynced;
+
+  // authMode is null until the session check resolves; subscriptions open only after.
+  const [authMode, setAuthMode] = useState<'userPool' | 'iam' | null>(null);
+
+  // Raw stream state — derived LeaderboardTeam[] computed in useMemo below
+  const [rawTeams, setRawTeams] = useState<Schema['Team']['type'][]>([]);
+  const [rawScores, setRawScores] = useState<Schema['Score']['type'][]>([]);
+  const [currentQuestion, setCurrentQuestion] = useState<number | null>(null);
 
   useEffect(() => {
     // localStorage is unavailable during SSR, so read it after mount.
@@ -39,7 +46,6 @@ export default function ViewerPage() {
       // Not valid JSON — fall through to legacy handling.
     }
     // Legacy: a bare team-id string.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFavoriteTeamIds(new Set([raw]));
   }, []);
 
@@ -53,35 +59,64 @@ export default function ViewerPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [qrExpanded]);
 
-  const onFavorite = useCallback((id: string) => {
-    setFavoriteTeamIds((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      if (next.size) localStorage.setItem(FAVORITE_KEY, JSON.stringify([...next]));
-      else localStorage.removeItem(FAVORITE_KEY);
-      return next;
-    });
+  // Resolve auth once on mount. allow.guest() compiles to identityPool IAM;
+  // allow.authenticated() compiles to Cognito user-pools "private". Pick the
+  // right mode so both states get through.
+  useEffect(() => {
+    void fetchAuthSession({ forceRefresh: false })
+      .catch(() => null)
+      .then((session) => {
+        const mode: 'userPool' | 'iam' = session?.tokens?.accessToken ? 'userPool' : 'iam';
+        setAuthMode(mode);
+        setGroups(
+          (session?.tokens?.accessToken?.payload['cognito:groups'] as string[] | undefined) ?? []
+        );
+      });
   }, []);
 
-  const fetchData = useCallback(async () => {
-    // allow.guest() compiles to identityPool IAM; allow.authenticated() compiles to
-    // Cognito user-pools "private". Pick the right mode so both states get through.
-    const session = await fetchAuthSession({ forceRefresh: false }).catch(() => null);
-    const authMode = session?.tokens?.accessToken ? 'userPool' : 'iam';
-    setGroups(
-      (session?.tokens?.accessToken?.payload['cognito:groups'] as string[] | undefined) ?? []
+  // Team stream — open once authMode is known.
+  useEffect(() => {
+    if (!authMode) return;
+    const mode = authMode;
+    return subscribeLive(
+      () => client.models.Team.observeQuery({ authMode: mode }),
+      ({ items, isSynced }) => {
+        setRawTeams(items);
+        if (isSynced) setTeamsSynced(true);
+      },
     );
+  }, [authMode]);
 
-    const [teamsAll, scoresAll, gameStateRes] = await Promise.all([
-      listAll((o) => client.models.Team.list({ ...o, authMode })),
-      listAll((o) => client.models.Score.list({ ...o, authMode })),
-      client.models.GameState.get({ id: GAME_STATE_ID }, { authMode }),
-    ]);
+  // Score stream — gate loading on isSynced so the leaderboard paints fully populated.
+  useEffect(() => {
+    if (!authMode) return;
+    const mode = authMode;
+    return subscribeLive(
+      () => client.models.Score.observeQuery({ authMode: mode }),
+      ({ items, isSynced }) => {
+        setRawScores(items);
+        if (isSynced) setScoresSynced(true);
+      },
+    );
+  }, [authMode]);
 
+  // GameState stream
+  useEffect(() => {
+    if (!authMode) return;
+    const mode = authMode;
+    return subscribeLive(
+      () => client.models.GameState.observeQuery({ authMode: mode }),
+      ({ items }) => setCurrentQuestion(items[0]?.currentQuestion ?? null),
+    );
+  }, [authMode]);
+
+  // Derive the leaderboard data from raw stream state.
+  // De-dupe scores, sum totals, build history, sort — same logic as the old fetchData.
+  const teams = useMemo((): LeaderboardTeam[] => {
     // De-dupe: keep only the latest record per (teamId, questionNumber) by updatedAt.
     // This guards against duplicate Score records that may exist from prior bugs.
-    const latestByCell = new Map<string, (typeof scoresAll)[number]>();
-    for (const s of scoresAll) {
+    const latestByCell = new Map<string, (typeof rawScores)[number]>();
+    for (const s of rawScores) {
       const k = `${s.teamId}#${s.questionNumber}`;
       const prev = latestByCell.get(k);
       if (!prev || (s.updatedAt ?? '') > (prev.updatedAt ?? '')) latestByCell.set(k, s);
@@ -96,7 +131,7 @@ export default function ViewerPage() {
       historyByTeam.set(score.teamId, arr);
     }
 
-    const computed: LeaderboardTeam[] = teamsAll
+    return rawTeams
       .map((team) => ({
         id: team.id,
         name: team.name,
@@ -107,19 +142,17 @@ export default function ViewerPage() {
         ),
       }))
       .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+  }, [rawTeams, rawScores]);
 
-    setTeams(computed);
-    setCurrentQuestion(gameStateRes.data?.currentQuestion ?? null);
-    setLoading(false);
+  const onFavorite = useCallback((id: string) => {
+    setFavoriteTeamIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.size) localStorage.setItem(FAVORITE_KEY, JSON.stringify([...next]));
+      else localStorage.removeItem(FAVORITE_KEY);
+      return next;
+    });
   }, []);
-
-  useEffect(() => {
-    // Async data load + polling: synchronizing React with an external system.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void fetchData();
-    const interval = setInterval(() => void fetchData(), POLL_MS);
-    return () => clearInterval(interval);
-  }, [fetchData]);
 
   const isAdmin = groups.includes('Admins');
   const isScorekeeper = groups.includes('Scorekeepers');
