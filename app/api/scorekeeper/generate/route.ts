@@ -72,10 +72,11 @@ export async function POST() {
         batchId,
       });
       return {
+        tokenId,
         teamId: team.id,
         teamName: team.name,
         groupType: team.groupType ?? null,
-        tokenId,
+        status: 'UNUSED' as const,
       };
     })
   );

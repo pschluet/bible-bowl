@@ -1,10 +1,9 @@
 /**
  * POST /api/scorekeeper/end-game — admin only
  *
- * Immediately revokes all scorekeeper Cognito sessions by calling
- * AdminUserGlobalSignOut on every user in the Scorekeepers group.
- * Also marks all remaining UNUSED tokens as consumed so stale QR codes
- * cannot be used to re-onboard after the event.
+ * Deletes all synthetic scorekeeper Cognito users (deletion revokes all active
+ * sessions), clears their team bindings, and marks any remaining UNUSED tokens
+ * as CONSUMED so stale QR codes cannot be re-used after the event.
  *
  * Effect on scorekeepers: their next API call (or background token refresh)
  * fails auth; the app detects the lost session and shows the "game has ended"
@@ -15,7 +14,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import {
   ListUsersInGroupCommand,
-  AdminUserGlobalSignOutCommand,
+  AdminDeleteUserCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
 import { generateServerClientUsingCookies } from '@aws-amplify/adapter-nextjs/data';
 import outputs from '@/amplify_outputs.json';
@@ -56,11 +55,11 @@ export async function POST() {
     nextToken = res.NextToken;
   } while (nextToken);
 
-  // 2. Global sign-out each scorekeeper (revokes all active sessions)
-  const signOutResults = await Promise.allSettled(
+  // 2. Delete each scorekeeper (deletion revokes all active sessions)
+  const deleteResults = await Promise.allSettled(
     scorekeepers.map((username) =>
       cognitoClient.send(
-        new AdminUserGlobalSignOutCommand({
+        new AdminDeleteUserCommand({
           UserPoolId: USER_POOL_ID,
           Username: username,
         })
@@ -68,19 +67,39 @@ export async function POST() {
     )
   );
 
-  const signOutFailures = signOutResults.filter((r) => r.status === 'rejected').length;
-  if (signOutFailures > 0) {
-    console.error(`AdminUserGlobalSignOut failed for ${signOutFailures} user(s)`);
+  const deleteFailures = deleteResults.filter((r) => r.status === 'rejected').length;
+  if (deleteFailures > 0) {
+    console.error(`AdminDeleteUser failed for ${deleteFailures} user(s)`);
   }
 
-  // 3. Mark all remaining UNUSED tokens consumed
-  try {
-    const dataClient = generateServerClientUsingCookies<Schema>({
-      config: outputs,
-      cookies,
-      authMode: 'apiKey',
-    });
+  const dataClient = generateServerClientUsingCookies<Schema>({
+    config: outputs,
+    cookies,
+    authMode: 'apiKey',
+  });
 
+  // 3. Clear team bindings for deleted scorekeepers (best-effort)
+  try {
+    const allTeams = await listAll((opts) => dataClient.models.Team.list(opts));
+    const boundTeams = allTeams.filter((t) => t.scorekeeperUserId || t.scorekeeperEmail);
+    if (boundTeams.length > 0) {
+      await Promise.all(
+        boundTeams.map((t) =>
+          dataClient.models.Team.update({
+            id: t.id,
+            scorekeeperUserId: null,
+            scorekeeperEmail: null,
+          })
+        )
+      );
+    }
+  } catch (err) {
+    // Non-fatal: sign-outs already happened; binding cleanup is best-effort
+    console.error('Team binding cleanup failed (non-fatal):', err);
+  }
+
+  // 4. Mark all remaining UNUSED tokens consumed (best-effort)
+  try {
     const unusedTokens = await listAll((opts) =>
       dataClient.models.OnboardingToken.list({
         ...opts,
@@ -101,13 +120,13 @@ export async function POST() {
       );
     }
   } catch (err) {
-    // Non-fatal: sign-outs already happened; token cleanup is best-effort
+    // Non-fatal: deletions already happened; token cleanup is best-effort
     console.error('Token cleanup failed (non-fatal):', err);
   }
 
   return NextResponse.json({
     success: true,
-    signedOut: scorekeepers.length,
-    failures: signOutFailures,
+    deleted: scorekeepers.length,
+    failures: deleteFailures,
   });
 }

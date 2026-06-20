@@ -13,10 +13,11 @@ import { QRCodeCanvas } from 'qrcode.react';
 import GroupPill from '@/app/components/GroupPill';
 
 export interface QrToken {
+  tokenId: string;
   teamId: string;
   teamName: string;
   groupType: string | null;
-  tokenId: string;
+  status: 'UNUSED' | 'CONSUMED';
 }
 
 interface Props {
@@ -78,7 +79,18 @@ export default function QrCodeDisplay({ tokens, initialIndex = 0, onClose }: Pro
         {/* Team identity */}
         <div className="flex flex-col items-center gap-1 text-center">
           <p className="text-lg font-bold text-gray-900">{token.teamName}</p>
-          {token.groupType && <GroupPill groupType={token.groupType} />}
+          <div className="flex items-center gap-1.5">
+            {token.groupType && <GroupPill groupType={token.groupType} />}
+            <span
+              className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                token.status === 'UNUSED'
+                  ? 'bg-green-100 text-green-700'
+                  : 'bg-gray-100 text-gray-500'
+              }`}
+            >
+              {token.status === 'UNUSED' ? 'Available' : 'Used'}
+            </span>
+          </div>
         </div>
 
         {/* QR code */}

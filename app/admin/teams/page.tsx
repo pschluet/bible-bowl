@@ -86,19 +86,6 @@ export default function AdminTeamsPage() {
     }
   }
 
-  async function handleRemoveScorekeeper(id: string) {
-    setError(null);
-    try {
-      await client.models.Team.update(
-        { id, scorekeeperUserId: null, scorekeeperEmail: null },
-        { authMode: 'userPool' }
-      );
-      // Stream delivers the update — no reload needed
-    } catch {
-      setError('Failed to remove scorekeeper.');
-    }
-  }
-
   async function handleMove(index: number, direction: 'up' | 'down') {
     const swapIndex = direction === 'up' ? index - 1 : index + 1;
     if (swapIndex < 0 || swapIndex >= sortedTeams.length) return;
@@ -231,7 +218,6 @@ export default function AdminTeamsPage() {
                 ) : (
                   <p className="truncate font-medium text-gray-900">{team.name}</p>
                 )}
-                <p className="truncate text-xs text-gray-400">{team.scorekeeperEmail ?? '—'}</p>
               </div>
 
               {/* Group selector */}
@@ -250,15 +236,6 @@ export default function AdminTeamsPage() {
               </select>
 
               <div className="flex items-center gap-2">
-                {team.scorekeeperUserId && (
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveScorekeeper(team.id)}
-                    className="text-sm font-medium text-amber-600 hover:text-amber-800"
-                  >
-                    Remove Scorekeeper
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={() => {

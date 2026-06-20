@@ -40,6 +40,8 @@ cognitoAdminUser.addToPrincipalPolicy(
       'cognito-idp:ListUsersInGroup',
       // End Game: immediately revoke all scorekeeper sessions
       'cognito-idp:AdminUserGlobalSignOut',
+      // End Game: delete synthetic scorekeeper users to fully reset between events
+      'cognito-idp:AdminDeleteUser',
     ],
     resources: [backend.auth.resources.userPool.userPoolArn],
   })

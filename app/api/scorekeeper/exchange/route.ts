@@ -6,12 +6,14 @@
  *
  * Flow:
  *   1. Validate token (exists, UNUSED, not expired).
- *   2. Resolve teamId → teamName.
- *   3. Ensure a Cognito user exists for the team (creates on first exchange).
- *   4. Add the user to the Scorekeepers group (idempotent).
- *   5. Set a random permanent password (confirms the account immediately).
- *   6. Mark the token CONSUMED.
- *   7. Return { username, password, teamId, teamName } to the client.
+ *   2. Mark the token CONSUMED immediately (prevents a second scan from
+ *      passing validation while Cognito admin calls are in-flight).
+ *   3. Resolve teamId → teamName.
+ *   4. Ensure a Cognito user exists for the team (creates on first exchange).
+ *   5. Add the user to the Scorekeepers group (idempotent).
+ *   6. Set a random permanent password (confirms the account immediately).
+ *   7. Bind team → scorekeeper sub.
+ *   8. Return { username, password, teamId, teamName } to the client.
  *
  * The client immediately calls signIn({ username, password,
  * options: { authFlowType: 'USER_PASSWORD_AUTH' } }) to obtain a real Cognito
@@ -80,7 +82,17 @@ export async function POST(request: Request) {
     );
   }
 
-  // 2. Resolve the team
+  // 2. Mark the token CONSUMED immediately — before any Cognito work — so a
+  //    second scan arriving while we're mid-flow reads CONSUMED and gets 409.
+  //    (Amplify Gen2 doesn't expose conditional writes, but early-consume closes
+  //    the sequential reuse case and shrinks the concurrent race to near-zero.)
+  await dataClient.models.OnboardingToken.update({
+    tokenId: token,
+    status: 'CONSUMED',
+    consumedAt: new Date().toISOString(),
+  });
+
+  // 3. Resolve the team
   const { data: team } = await dataClient.models.Team.get({ id: tokenRow.teamId });
   if (!team) {
     return NextResponse.json({ error: 'TEAM_NOT_FOUND', message: 'Team not found.' }, { status: 404 });
@@ -96,7 +108,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
   }
 
-  // 3. Ensure the Cognito user exists
+  // 4. Ensure the Cognito user exists
   let userSub: string;
   try {
     // Try to fetch the existing user
@@ -132,7 +144,7 @@ export async function POST(request: Request) {
     }
   }
 
-  // 4. Ensure the user is in the Scorekeepers group (idempotent)
+  // 5. Ensure the user is in the Scorekeepers group (idempotent)
   try {
     await cognitoClient.send(
       new AdminAddUserToGroupCommand({
@@ -146,7 +158,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Failed to assign group' }, { status: 500 });
   }
 
-  // 5. Set a random permanent password (immediately confirms the account)
+  // 6. Set a random permanent password (immediately confirms the account)
   // The password is returned once to the client for use with USER_PASSWORD_AUTH
   // and rotated on every exchange — scorekeepers never know it.
   //
@@ -168,7 +180,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Failed to set credentials' }, { status: 500 });
   }
 
-  // 6. Bind the team to this scorekeeper's sub
+  // 7. Bind the team to this scorekeeper's sub
   try {
     await dataClient.models.Team.update({
       id: team.id,
@@ -179,13 +191,6 @@ export async function POST(request: Request) {
     // Non-fatal: the scorekeeper is signed in; the admin can reassign from the UI
     console.error('Team binding failed (non-fatal):', err);
   }
-
-  // 7. Mark token consumed
-  await dataClient.models.OnboardingToken.update({
-    tokenId: token,
-    status: 'CONSUMED',
-    consumedAt: new Date().toISOString(),
-  });
 
   return NextResponse.json({
     username,
