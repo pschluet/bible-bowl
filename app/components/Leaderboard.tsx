@@ -52,6 +52,7 @@ function TeamRow({
   onFavorite,
   isExpanded,
   onToggle,
+  className = '',
 }: {
   team: LeaderboardTeam;
   rank: number;
@@ -59,11 +60,12 @@ function TeamRow({
   onFavorite: (id: string) => void;
   isExpanded: boolean;
   onToggle: (id: string) => void;
+  className?: string;
 }) {
   return (
-    <div>
+    <div className={className}>
       <div className="flex items-center gap-3 px-4 py-4">
-        <span className="w-8 shrink-0 text-center text-lg font-semibold text-gray-500">
+        <span className="w-8 shrink-0 text-center text-lg font-semibold text-gray-500 lg:w-12 lg:text-2xl">
           {rankLabel(rank)}
         </span>
 
@@ -74,11 +76,13 @@ function TeamRow({
           onClick={() => onToggle(team.id)}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
-          <span className="min-w-0 flex-1 break-words line-clamp-2 font-medium text-gray-900">
+          <span className="min-w-0 flex-1 break-words line-clamp-2 font-medium text-gray-900 lg:text-xl">
             {team.name}
           </span>
           <LatestBadge history={team.history} />
-          <span className="text-2xl font-bold tabular-nums text-gray-900">{team.total}</span>
+          <span className="text-2xl font-bold tabular-nums text-gray-900 lg:text-4xl">
+            {team.total}
+          </span>
           <span
             className={`text-gray-400 transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}
             aria-hidden
@@ -133,6 +137,9 @@ function GroupSection({
   onFavorite,
   expandedIds,
   onToggle,
+  isGroupExpanded,
+  onGroupToggle,
+  groupKey,
 }: {
   label: string;
   groupType: string | null;
@@ -141,20 +148,55 @@ function GroupSection({
   onFavorite: (id: string) => void;
   expandedIds: Set<string>;
   onToggle: (id: string) => void;
+  isGroupExpanded: boolean;
+  onGroupToggle: (key: string) => void;
+  groupKey: string;
 }) {
   if (teams.length === 0) return null;
+
+  /**
+   * Visibility class for each row by zero-based index when not fully expanded:
+   *   i < 3  — always visible (both mobile and desktop)
+   *   3 ≤ i < 5 — desktop only (hidden on mobile)
+   *   i ≥ 5  — hidden everywhere
+   * When fully expanded, all rows are visible.
+   */
+  function rowVisibilityClass(i: number): string {
+    if (isGroupExpanded) return '';
+    if (i < 3) return '';
+    if (i < 5) return 'hidden lg:block';
+    return 'hidden';
+  }
+
+  /**
+   * "Show more / Show less" toggle button display:
+   *   collapsed, teams ≤ 3 → not needed (don't render)
+   *   collapsed, 3 < teams ≤ 5 → mobile-only button (flex lg:hidden)
+   *   collapsed, teams > 5 → show on both (flex)
+   *   expanded → always show "Show less" (flex)
+   */
+  const showToggle = teams.length > 3 || isGroupExpanded;
+  let toggleClass = 'flex';
+  if (!isGroupExpanded && teams.length <= 5) toggleClass = 'flex lg:hidden';
+
   return (
-    <div className="mt-3">
+    <div className="mt-3 lg:mt-0">
       <div className="px-4 pb-1 pt-2">
         <span
           className={
-            groupType ? 'text-lg font-bold text-gray-700' : 'text-sm font-semibold text-gray-500'
+            groupType
+              ? 'text-lg font-bold text-gray-700 lg:text-2xl'
+              : 'text-sm font-semibold text-gray-500'
           }
         >
           {label}
         </span>
       </div>
-      <div className="divide-y divide-gray-200 bg-white">
+      <div
+        className={`divide-y divide-gray-200 bg-white${
+          isGroupExpanded ? ' lg:max-h-[32rem] lg:overflow-y-auto' : ''
+        }`}
+      >
         {teams.map((team, i) => (
           <TeamRow
             key={team.id}
@@ -164,9 +206,25 @@ function GroupSection({
             onFavorite={onFavorite}
             isExpanded={expandedIds.has(team.id)}
             onToggle={onToggle}
+            className={rowVisibilityClass(i)}
           />
         ))}
       </div>
+      {showToggle && (
+        <button
+          type="button"
+          onClick={() => onGroupToggle(groupKey)}
+          className={`${toggleClass} w-full items-center justify-center gap-1 border-t border-gray-100 bg-white py-2 text-sm text-indigo-600 hover:text-indigo-800`}
+        >
+          <span
+            className={`transition-transform duration-150 ${isGroupExpanded ? 'rotate-90' : ''}`}
+            aria-hidden
+          >
+            ▸
+          </span>
+          {isGroupExpanded ? 'Show less' : `Show all (${teams.length})`}
+        </button>
+      )}
     </div>
   );
 }
@@ -182,14 +240,26 @@ export default function Leaderboard({
   const onToggle = (id: string) =>
     setExpandedIds((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   const [favExpandedIds, setFavExpandedIds] = useState<Set<string>>(new Set());
   const onFavToggle = (id: string) =>
     setFavExpandedIds((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  // Per-group expand/collapse state (show all vs. show top N)
+  const [expandedGroupKeys, setExpandedGroupKeys] = useState<Set<string>>(new Set());
+  const onGroupToggle = (key: string) =>
+    setExpandedGroupKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
 
@@ -233,7 +303,9 @@ export default function Leaderboard({
   }
 
   return (
-    <div className="mx-auto w-full max-w-lg flex-1 overflow-y-auto">
+    // Mobile: max-w-lg centered column with scroll.
+    // Desktop (lg+): full-width, no page scroll — columns scroll internally when expanded.
+    <div className="mx-auto w-full max-w-lg flex-1 overflow-y-auto lg:max-w-none lg:overflow-visible lg:px-6">
       {currentQuestion !== null && (
         <div className="flex justify-center px-4 pt-3">
           <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800">
@@ -262,7 +334,7 @@ export default function Leaderboard({
                     <span className="block break-words line-clamp-2 font-semibold text-gray-900">
                       {team.name}
                     </span>
-                    <span className="flex items-center gap-1.5 mt-0.5">
+                    <span className="mt-0.5 flex items-center gap-1.5">
                       <span className="text-xs font-semibold uppercase tracking-wide text-amber-600">
                         ★ Your Team
                       </span>
@@ -291,27 +363,37 @@ export default function Leaderboard({
         </div>
       )}
 
-      {/* One section per group in defined order, then Other */}
-      {GROUP_TYPES.map((g) => (
-        <GroupSection
-          key={g}
-          groupType={g}
-          label={GROUP_LABELS[g]}
-          teams={byGroup.get(g) ?? []}
-          favoriteTeamIds={favoriteTeamIds}
-          onFavorite={onFavorite}
-          expandedIds={expandedIds}
-          onToggle={onToggle}
-        />
-      ))}
+      {/* Mobile: stacked sections. Desktop (lg+): 3-column grid, one column per age group. */}
+      <div className="lg:mt-4 lg:grid lg:grid-cols-3 lg:gap-6">
+        {GROUP_TYPES.map((g) => (
+          <GroupSection
+            key={g}
+            groupType={g}
+            label={GROUP_LABELS[g]}
+            teams={byGroup.get(g) ?? []}
+            groupKey={g}
+            isGroupExpanded={expandedGroupKeys.has(g)}
+            favoriteTeamIds={favoriteTeamIds}
+            onFavorite={onFavorite}
+            expandedIds={expandedIds}
+            onToggle={onToggle}
+            onGroupToggle={onGroupToggle}
+          />
+        ))}
+      </div>
+
+      {/* "Other" sits full-width below the three columns on both mobile and desktop */}
       <GroupSection
         groupType={null}
         label="Other"
         teams={byGroup.get('Other') ?? []}
+        groupKey="Other"
+        isGroupExpanded={expandedGroupKeys.has('Other')}
         favoriteTeamIds={favoriteTeamIds}
         onFavorite={onFavorite}
         expandedIds={expandedIds}
         onToggle={onToggle}
+        onGroupToggle={onGroupToggle}
       />
     </div>
   );
