@@ -23,15 +23,16 @@ function healDuplicates(all: Score[]) {
   for (const s of all) {
     const k = `${s.teamId}#${s.questionNumber}`;
     let arr = byKey.get(k);
-    if (!arr) { arr = []; byKey.set(k, arr); }
+    if (!arr) {
+      arr = [];
+      byKey.set(k, arr);
+    }
     arr.push(s);
   }
   for (const recs of byKey.values()) {
     if (recs.length < 2) continue;
     // keep the latest, delete the rest
-    const sorted = [...recs].sort(
-      (a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')
-    );
+    const sorted = [...recs].sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
     sorted.slice(1).forEach((s) => {
       void client.models.Score.delete({ id: s.id }, { authMode: 'userPool' });
     });
@@ -95,9 +96,12 @@ export default function AdminScoresPage() {
   }, [streamedScores]);
 
   // Clear the advance timer on unmount to avoid setState on an unmounted component
-  useEffect(() => () => {
-    if (advanceTimerRef.current !== null) clearTimeout(advanceTimerRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (advanceTimerRef.current !== null) clearTimeout(advanceTimerRef.current);
+    },
+    []
+  );
 
   // Sorted teams — single source of truth for order (used by both grid and drawer)
   const sortedTeams = useMemo(() => [...teams].sort(compareTeamOrder), [teams]);
@@ -121,7 +125,9 @@ export default function AdminScoresPage() {
     }
     return map;
   }, [scores]);
-  useEffect(() => { scoreMapRef.current = scoreMap; }, [scoreMap]);
+  useEffect(() => {
+    scoreMapRef.current = scoreMap;
+  }, [scoreMap]);
 
   // Default selection to first team once the game is active
   useEffect(() => {
@@ -141,7 +147,7 @@ export default function AdminScoresPage() {
       ({ items, isSynced }) => {
         setTeams(items);
         if (isSynced) setTeamsSynced(true);
-      },
+      }
     );
   }, []);
 
@@ -158,7 +164,7 @@ export default function AdminScoresPage() {
             healDuplicates(items); // fire-and-forget background DB cleanup
           }
         }
-      },
+      }
     );
   }, []);
 
@@ -168,7 +174,7 @@ export default function AdminScoresPage() {
       () => client.models.GameState.observeQuery({ authMode: 'userPool' }),
       ({ items }) => {
         setCurrentQuestion(items[0]?.currentQuestion ?? null);
-      },
+      }
     );
   }, []);
 
@@ -196,7 +202,7 @@ export default function AdminScoresPage() {
     setError(null);
     try {
       await client.models.GameState.create(
-        { id: GAME_STATE_ID, currentQuestion: 1 },
+        { id: GAME_STATE_ID, currentQuestion: 1, scoringOpen: true },
         { authMode: 'userPool' }
       );
       // Stream delivers the new GameState — no reload needed
@@ -237,9 +243,7 @@ export default function AdminScoresPage() {
       // Amplify has no bulk delete — list all pages then delete each Score.
       let nextToken: string | null | undefined;
       do {
-        const page = await client.models.Score.list(
-          nextToken ? { nextToken } : undefined
-        );
+        const page = await client.models.Score.list(nextToken ? { nextToken } : undefined);
         await Promise.all(
           page.data.map((s) => client.models.Score.delete({ id: s.id }, { authMode: 'userPool' }))
         );
@@ -275,7 +279,14 @@ export default function AdminScoresPage() {
       setOptimisticScores((prev) => {
         const next = prev.filter((s) => s.id !== id);
         // Spread existing to preserve any Amplify-generated fields we don't touch
-        next.push({ ...(existing ?? {}), id, teamId, questionNumber, points, updatedAt: now } as Score);
+        next.push({
+          ...(existing ?? {}),
+          id,
+          teamId,
+          questionNumber,
+          points,
+          updatedAt: now,
+        } as Score);
         return next;
       });
 
@@ -319,18 +330,15 @@ export default function AdminScoresPage() {
     [currentQuestion, saveScore, selectNext]
   );
 
-  const handleScoreDelete = useCallback(
-    async (existingId: string) => {
-      setError(null);
-      try {
-        await client.models.Score.delete({ id: existingId }, { authMode: 'userPool' });
-        // Stream delivers the delete — no reload needed
-      } catch {
-        setError('Failed to clear score.');
-      }
-    },
-    []
-  );
+  const handleScoreDelete = useCallback(async (existingId: string) => {
+    setError(null);
+    try {
+      await client.models.Score.delete({ id: existingId }, { authMode: 'userPool' });
+      // Stream delivers the delete — no reload needed
+    } catch {
+      setError('Failed to clear score.');
+    }
+  }, []);
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -416,8 +424,8 @@ export default function AdminScoresPage() {
       <div className="mt-10 rounded-lg border border-red-200 bg-red-50 p-4">
         <h2 className="text-sm font-semibold text-red-800">Danger Zone</h2>
         <p className="mt-1 text-sm text-red-700">
-          Delete all scores and reset the game to &ldquo;not started&rdquo;. Teams and
-          scorekeeper assignments are kept.
+          Delete all scores and reset the game to &ldquo;not started&rdquo;. Teams and scorekeeper
+          assignments are kept.
         </p>
         <button
           type="button"

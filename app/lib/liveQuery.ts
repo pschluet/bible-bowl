@@ -21,7 +21,7 @@ type Snapshot<M> = { items: M[]; isSynced: boolean };
  */
 export function subscribeLive<M>(
   makeObservable: () => Observable<Snapshot<M>>,
-  onSnapshot: (snapshot: Snapshot<M>) => void,
+  onSnapshot: (snapshot: Snapshot<M>) => void
 ): () => void {
   let sub: { unsubscribe: () => void } | null = null;
   let backoff: ReturnType<typeof setTimeout> | null = null;

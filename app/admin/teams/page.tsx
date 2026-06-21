@@ -31,7 +31,7 @@ export default function AdminTeamsPage() {
       ({ items, isSynced }) => {
         setTeams(items);
         if (isSynced) setLoading(false);
-      },
+      }
     );
   }, []);
 
@@ -42,7 +42,10 @@ export default function AdminTeamsPage() {
     setError(null);
     try {
       const displayOrder = teams.reduce((m, t) => Math.max(m, t.displayOrder ?? -1), -1) + 1;
-      await client.models.Team.create({ name, groupType: newGroup, displayOrder }, { authMode: 'userPool' });
+      await client.models.Team.create(
+        { name, groupType: newGroup, displayOrder },
+        { authMode: 'userPool' }
+      );
       setNewName('');
       // Stream delivers the new team — no reload needed
     } catch {
@@ -86,19 +89,6 @@ export default function AdminTeamsPage() {
     }
   }
 
-  async function handleRemoveScorekeeper(id: string) {
-    setError(null);
-    try {
-      await client.models.Team.update(
-        { id, scorekeeperUserId: null, scorekeeperEmail: null },
-        { authMode: 'userPool' }
-      );
-      // Stream delivers the update — no reload needed
-    } catch {
-      setError('Failed to remove scorekeeper.');
-    }
-  }
-
   async function handleMove(index: number, direction: 'up' | 'down') {
     const swapIndex = direction === 'up' ? index - 1 : index + 1;
     if (swapIndex < 0 || swapIndex >= sortedTeams.length) return;
@@ -108,8 +98,8 @@ export default function AdminTeamsPage() {
     const teamB = sortedTeams[swapIndex];
 
     // Optimistic: swap display orders in local state so the UI updates instantly
-    setTeams(cur =>
-      cur.map(t => {
+    setTeams((cur) =>
+      cur.map((t) => {
         if (t.id === teamA.id) return { ...t, displayOrder: swapIndex };
         if (t.id === teamB.id) return { ...t, displayOrder: index };
         return t;
@@ -122,17 +112,14 @@ export default function AdminTeamsPage() {
           { id: teamA.id, displayOrder: swapIndex },
           { authMode: 'userPool' }
         ),
-        client.models.Team.update(
-          { id: teamB.id, displayOrder: index },
-          { authMode: 'userPool' }
-        ),
+        client.models.Team.update({ id: teamB.id, displayOrder: index }, { authMode: 'userPool' }),
       ]);
       // Stream delivers confirmed updates — no reload needed
     } catch {
       setError('Failed to reorder teams.');
       // Revert optimistic state
-      setTeams(cur =>
-        cur.map(t => {
+      setTeams((cur) =>
+        cur.map((t) => {
           if (t.id === teamA.id) return { ...t, displayOrder: index };
           if (t.id === teamB.id) return { ...t, displayOrder: swapIndex };
           return t;
@@ -167,7 +154,9 @@ export default function AdminTeamsPage() {
           className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
         >
           {GROUP_TYPES.map((g) => (
-            <option key={g} value={g}>{GROUP_LABELS[g]}</option>
+            <option key={g} value={g}>
+              {GROUP_LABELS[g]}
+            </option>
           ))}
         </select>
         <button
@@ -231,7 +220,6 @@ export default function AdminTeamsPage() {
                 ) : (
                   <p className="truncate font-medium text-gray-900">{team.name}</p>
                 )}
-                <p className="truncate text-xs text-gray-400">{team.scorekeeperEmail ?? '—'}</p>
               </div>
 
               {/* Group selector */}
@@ -245,20 +233,13 @@ export default function AdminTeamsPage() {
               >
                 <option value="">— group —</option>
                 {GROUP_TYPES.map((g) => (
-                  <option key={g} value={g}>{GROUP_LABELS[g]}</option>
+                  <option key={g} value={g}>
+                    {GROUP_LABELS[g]}
+                  </option>
                 ))}
               </select>
 
               <div className="flex items-center gap-2">
-                {team.scorekeeperUserId && (
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveScorekeeper(team.id)}
-                    className="text-sm font-medium text-amber-600 hover:text-amber-800"
-                  >
-                    Remove Scorekeeper
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={() => {

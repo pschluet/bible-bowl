@@ -2,11 +2,16 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
+import { getCurrentUser } from 'aws-amplify/auth';
 import type { Schema } from '@/amplify/data/resource';
-import { compareTeamOrder } from '@/app/lib/constants';
+import { subscribeLive } from '@/app/lib/liveQuery';
+import { GAME_STATE_ID, compareTeamOrder } from '@/app/lib/constants';
+import { SCOREKEEPER_EMAIL_DOMAIN } from '@/app/lib/cognito';
+import QrCodeDisplay, { type QrToken } from '@/app/components/QrCodeDisplay';
+import QrCodePrintGrid from '@/app/components/QrCodePrintGrid';
 
 type Team = Schema['Team']['type'];
-type Role = 'Admins' | 'Scorekeepers';
+type GameState = Schema['GameState']['type'];
 
 interface CognitoUser {
   username: string;
@@ -18,26 +23,50 @@ interface CognitoUser {
 
 const client = generateClient<Schema>({ authMode: 'userPool' });
 
+/** True for QR-onboarded scorekeeper users (synthetic username pattern). */
+function isSyntheticScorekeeper(user: CognitoUser): boolean {
+  return user.email.endsWith(`@${SCOREKEEPER_EMAIL_DOMAIN}`);
+}
+
 export default function AdminUsersPage() {
-  // ── create-user form state ──────────────────────────────────────────────
+  // ── teams ──────────────────────────────────────────────────────────────────
   const [teams, setTeams] = useState<Team[]>([]);
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState<Role>('Scorekeepers');
-  const [teamId, setTeamId] = useState('');
+
+  // ── QR onboarding section ──────────────────────────────────────────────────
+  const [tokens, setTokens] = useState<QrToken[]>([]);
+  const [generating, setGenerating] = useState(false);
+  const [qrDisplayIndex, setQrDisplayIndex] = useState<number | null>(null);
+  const [showPrintGrid, setShowPrintGrid] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+
+  // ── GameState (scoringOpen toggle) ────────────────────────────────────────
+  const [gameState, setGameState] = useState<GameState | null>(null);
+  const [togglingEntry, setTogglingEntry] = useState(false);
+
+  // End Game
+  const [endingGame, setEndingGame] = useState(false);
+  const [endGameConfirm, setEndGameConfirm] = useState(false);
+  const [endGameResult, setEndGameResult] = useState<string | null>(null);
+
+  // ── create admin form ──────────────────────────────────────────────────────
+  const [adminEmail, setAdminEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // ── existing-users list state ───────────────────────────────────────────
+  // ── existing-users list ────────────────────────────────────────────────────
   const [users, setUsers] = useState<CognitoUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [usersError, setUsersError] = useState<string | null>(null);
 
-  // ── per-row in-flight tracking ──────────────────────────────────────────
-  const [savingRole, setSavingRole] = useState<string | null>(null); // username
-  const [savingTeam, setSavingTeam] = useState<string | null>(null); // username
+  const [refreshingUsers, setRefreshingUsers] = useState(false);
 
-  // ── load teams + users ──────────────────────────────────────────────────
+  // ── per-user delete ────────────────────────────────────────────────────────
+  const [currentSub, setCurrentSub] = useState<string | null>(null);
+  const [deleteConfirmUser, setDeleteConfirmUser] = useState<string | null>(null);
+  const [deletingUser, setDeletingUser] = useState<string | null>(null);
+
+  // ── load teams + users ─────────────────────────────────────────────────────
   const loadTeams = useCallback(async () => {
     try {
       const res = await client.models.Team.list();
@@ -64,27 +93,158 @@ export default function AdminUsersPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadTeams();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadUsers();
+    // Identify the signed-in admin so we can disable self-delete
+    void getCurrentUser()
+      .then(({ userId }) => setCurrentSub(userId))
+      .catch(() => {});
   }, [loadTeams, loadUsers]);
 
-  // ── create user ─────────────────────────────────────────────────────────
+  // ── Live GameState subscription ───────────────────────────────────────────
+  useEffect(() => {
+    return subscribeLive(
+      () => client.models.GameState.observeQuery({ authMode: 'userPool' }),
+      ({ items }) => setGameState(items[0] ?? null)
+    );
+  }, []);
+
+  // ── Live token subscription ────────────────────────────────────────────────
+  // Hydrates on mount AND streams UNUSED→CONSUMED status changes in real-time
+  // so the admin sees "Used" badges appear as scorekeepers onboard without
+  // reloading. Depends on `teams` for the team-name join; re-subscribes if
+  // teams change.
+  useEffect(() => {
+    if (teams.length === 0) return; // wait until teams have loaded
+
+    return subscribeLive(
+      () => client.models.OnboardingToken.observeQuery({ authMode: 'userPool' }),
+      ({ items }) => {
+        if (items.length === 0) {
+          setTokens([]);
+          return;
+        }
+
+        // Find the most recently generated batch (latest expiresAt across the batch)
+        const byBatch = new Map<string, typeof items>();
+        for (const item of items) {
+          const key = item.batchId ?? '__none__';
+          if (!byBatch.has(key)) byBatch.set(key, []);
+          byBatch.get(key)!.push(item);
+        }
+
+        let latestBatchKey = '__none__';
+        let latestExpiry = '';
+        for (const [batchKey, batchItems] of byBatch) {
+          const maxExpiry = batchItems.reduce(
+            (best, t) => (t.expiresAt && t.expiresAt > best ? t.expiresAt : best),
+            ''
+          );
+          if (maxExpiry > latestExpiry) {
+            latestExpiry = maxExpiry;
+            latestBatchKey = batchKey;
+          }
+        }
+
+        const latestBatch = byBatch.get(latestBatchKey) ?? [];
+
+        // Join against the sorted teams array to produce QrToken[]
+        const mapped: QrToken[] = latestBatch
+          .flatMap((t): QrToken[] => {
+            const team = teams.find((tm) => tm.id === t.teamId);
+            if (!team) return [];
+            return [
+              {
+                tokenId: t.tokenId,
+                teamId: t.teamId,
+                teamName: team.name,
+                groupType: team.groupType ?? null,
+                status: (t.status ?? 'UNUSED') as 'UNUSED' | 'CONSUMED',
+              },
+            ];
+          })
+          // Preserve the same order as the sorted teams list
+          .sort((a, b) => {
+            const ai = teams.findIndex((t) => t.id === a.teamId);
+            const bi = teams.findIndex((t) => t.id === b.teamId);
+            return ai - bi;
+          });
+
+        setTokens(mapped);
+      }
+    );
+  }, [teams]); // `client` is module-level stable — no need to list it
+
+  // ── QR generation ──────────────────────────────────────────────────────────
+  async function handleGenerate() {
+    setGenerating(true);
+    setGenerateError(null);
+    try {
+      const res = await fetch('/api/scorekeeper/generate', { method: 'POST' });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error ?? 'Failed to generate QR codes.');
+      }
+      // Tokens are now owned by the observeQuery subscription — no manual setTokens needed.
+      // The new batch will appear within milliseconds via the live subscription.
+      await loadUsers(); // refresh so any newly created scorekeeper users appear
+    } catch (err) {
+      setGenerateError(err instanceof Error ? err.message : 'Failed to generate QR codes.');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  // ── Toggle scorekeeper entry ───────────────────────────────────────────────
+  async function handleToggleEntry() {
+    if (!gameState) return;
+    setTogglingEntry(true);
+    try {
+      const entryDisabled = gameState.scoringOpen === false;
+      await client.models.GameState.update(
+        { id: GAME_STATE_ID, scoringOpen: entryDisabled },
+        { authMode: 'userPool' }
+      );
+      // Subscription delivers the update — no manual state set needed
+    } finally {
+      setTogglingEntry(false);
+    }
+  }
+
+  // ── End Game ───────────────────────────────────────────────────────────────
+  async function handleEndGame() {
+    setEndingGame(true);
+    setEndGameResult(null);
+    setEndGameConfirm(false);
+    try {
+      const res = await fetch('/api/scorekeeper/end-game', { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to end game.');
+      const data = (await res.json()) as { deleted?: number; failures?: number };
+      setEndGameResult(
+        `Game ended. Deleted ${data.deleted ?? 0} scorekeeper(s).${
+          (data.failures ?? 0) > 0 ? ` (${data.failures} failure(s) — see logs)` : ''
+        }`
+      );
+      // Refresh users + teams so deleted scorekeepers and cleared bindings are gone.
+      // Token badges update automatically via the live subscription.
+      await Promise.all([loadUsers(), loadTeams()]);
+    } catch (err) {
+      setEndGameResult(err instanceof Error ? err.message : 'Failed to end game.');
+    } finally {
+      setEndingGame(false);
+    }
+  }
+
+  // ── create admin user ──────────────────────────────────────────────────────
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     setSuccess(null);
     setError(null);
     try {
-      const body: { email: string; role: Role; teamId?: string } = {
-        email: email.trim(),
-        role,
-      };
-      if (role === 'Scorekeepers' && teamId) body.teamId = teamId;
-
       const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ email: adminEmail.trim() }),
       });
 
       if (!res.ok) {
@@ -92,10 +252,9 @@ export default function AdminUsersPage() {
         throw new Error(data?.error ?? 'Failed to create user.');
       }
 
-      setSuccess("User created! They'll receive a temporary password by email.");
-      setEmail('');
-      setTeamId('');
-      await Promise.all([loadUsers(), loadTeams()]);
+      setSuccess("Admin user created! They'll receive a temporary password by email.");
+      setAdminEmail('');
+      await loadUsers();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create user.');
     } finally {
@@ -103,85 +262,186 @@ export default function AdminUsersPage() {
     }
   }
 
-  // ── change role ─────────────────────────────────────────────────────────
-  async function handleRoleChange(user: CognitoUser, newRole: Role) {
-    setSavingRole(user.username);
+  // ── delete user ────────────────────────────────────────────────────────────
+  async function handleDeleteUser(user: CognitoUser) {
+    setDeletingUser(user.username);
     setUsersError(null);
     try {
       const res = await fetch('/api/admin/users', {
-        method: 'PATCH',
+        method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: user.username, role: newRole, sub: user.sub }),
+        body: JSON.stringify({ username: user.username, sub: user.sub }),
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(data?.error ?? 'Failed to update role.');
+        throw new Error(data?.error ?? 'Failed to delete user.');
       }
+      setDeleteConfirmUser(null);
       await Promise.all([loadUsers(), loadTeams()]);
     } catch (err) {
-      setUsersError(err instanceof Error ? err.message : 'Failed to update role.');
+      setUsersError(err instanceof Error ? err.message : 'Failed to delete user.');
     } finally {
-      setSavingRole(null);
+      setDeletingUser(null);
     }
   }
 
-  // ── assign team ─────────────────────────────────────────────────────────
-  async function handleTeamChange(user: CognitoUser, newTeamId: string) {
-    setSavingTeam(user.username);
-    setUsersError(null);
-    try {
-      // Clear any existing assignment for this user
-      const currentTeam = teams.find((t) => t.scorekeeperUserId === user.sub);
-      if (currentTeam && currentTeam.id !== newTeamId) {
-        await client.models.Team.update(
-          { id: currentTeam.id, scorekeeperUserId: null, scorekeeperEmail: null },
-          { authMode: 'userPool' }
-        );
-      }
-
-      if (newTeamId) {
-        await client.models.Team.update(
-          { id: newTeamId, scorekeeperUserId: user.sub, scorekeeperEmail: user.email },
-          { authMode: 'userPool' }
-        );
-      }
-
-      await loadTeams();
-    } catch (err) {
-      setUsersError(err instanceof Error ? err.message : 'Failed to update team assignment.');
-    } finally {
-      setSavingTeam(null);
-    }
-  }
-
-  // ── helpers ─────────────────────────────────────────────────────────────
-  function userRole(user: CognitoUser): Role {
-    if (user.groups.includes('Admins')) return 'Admins';
-    return 'Scorekeepers';
-  }
-
-  /** Find the team currently assigned to this user (by sub or email fallback). */
+  // ── helpers ────────────────────────────────────────────────────────────────
+  /** Find the team currently assigned to this user. */
   function assignedTeamId(user: CognitoUser): string {
+    // For synthetic scorekeepers the username encodes the teamId directly:
+    // "team-<teamId>@bible-bowl.internal". This is the most reliable source
+    // since Team.scorekeeperUserId may be unset if the binding step failed.
+    if (isSyntheticScorekeeper(user)) {
+      const match = user.email.match(/^team-(.+)@/);
+      if (match) {
+        const teamId = match[1];
+        if (teams.some((t) => t.id === teamId)) return teamId;
+      }
+    }
     const byId = teams.find((t) => t.scorekeeperUserId === user.sub);
     if (byId) return byId.id;
-    // Fall back to email-only pre-assignment (set during user creation)
-    const byEmail = teams.find(
-      (t) => !t.scorekeeperUserId && t.scorekeeperEmail === user.email
-    );
+    const byEmail = teams.find((t) => !t.scorekeeperUserId && t.scorekeeperEmail === user.email);
     return byEmail?.id ?? '';
   }
 
-  // ── render ───────────────────────────────────────────────────────────────
+  // ── render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="mx-auto max-w-2xl">
-      <h1 className="mb-6 text-2xl font-bold text-gray-900">Users</h1>
+    <div className="mx-auto max-w-2xl space-y-8">
+      <h1 className="text-2xl font-bold text-gray-900">Users</h1>
 
-      {/* ── Create user form ── */}
+      {/* ── Scorekeeper Onboarding ── */}
+      <section className="rounded-lg border border-gray-200 bg-white p-6">
+        {/* Heading */}
+        <div className="mb-4">
+          <h2 className="text-base font-semibold text-gray-900">Scorekeeper Onboarding</h2>
+          <p className="mt-0.5 text-xs text-gray-500">
+            Generate one QR code per team. Scorekeepers scan the code to sign in automatically.
+          </p>
+        </div>
+
+        {/* Generate/Show/Print buttons */}
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={generating}
+            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {generating
+              ? 'Generating…'
+              : tokens.length > 0
+                ? 'Regenerate QR Codes'
+                : 'Generate QR Codes'}
+          </button>
+
+          {tokens.length > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() => setQrDisplayIndex(0)}
+                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Show All QR Codes
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowPrintGrid(true)}
+                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Print All
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* Toggle scorekeeper entry */}
+        {(() => {
+          const gameExists = gameState !== null;
+          const entryEnabled = gameState?.scoringOpen !== false;
+          return (
+            <div className="mb-4">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={entryEnabled}
+                onClick={() => void handleToggleEntry()}
+                disabled={togglingEntry || !gameExists}
+                title={!gameExists ? 'Initialize a game first' : undefined}
+                className="flex items-center gap-2 disabled:opacity-50"
+              >
+                {/* Track */}
+                <span
+                  className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors duration-200 ${
+                    entryEnabled ? 'bg-green-500' : 'bg-gray-300'
+                  }`}
+                >
+                  {/* Thumb */}
+                  <span
+                    className={`inline-block h-4 w-4 translate-y-0.5 rounded-full bg-white shadow transition-transform duration-200 ${
+                      entryEnabled ? 'translate-x-4' : 'translate-x-0.5'
+                    }`}
+                  />
+                </span>
+                <span className="text-xs font-medium text-gray-700">
+                  Scorekeeper Entry {entryEnabled ? 'Enabled' : 'Disabled'}
+                </span>
+              </button>
+            </div>
+          );
+        })()}
+
+        {generateError && (
+          <div className="mb-4 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">
+            {generateError}
+          </div>
+        )}
+
+        {/* Per-team token list */}
+        {tokens.length > 0 && (
+          <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+            {tokens.map((token, idx) => (
+              <li
+                key={token.tokenId}
+                className="flex items-center justify-between gap-3 px-4 py-2.5"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-gray-900">{token.teamName}</p>
+                  {token.groupType && <p className="text-xs text-gray-400">{token.groupType}</p>}
+                </div>
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
+                    token.status === 'UNUSED'
+                      ? 'bg-green-100 text-green-700'
+                      : 'bg-gray-100 text-gray-500'
+                  }`}
+                >
+                  {token.status === 'UNUSED' ? 'Available' : 'Used'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setQrDisplayIndex(idx)}
+                  className="shrink-0 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                >
+                  Show QR
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {tokens.length === 0 && !generating && (
+          <p className="text-sm text-gray-400">
+            No QR codes generated yet. Click &quot;Generate QR Codes&quot; to create them.
+          </p>
+        )}
+      </section>
+
+      {/* ── Create Admin User form ── */}
       <form
         onSubmit={handleSubmit}
-        className="mb-8 flex flex-col gap-4 rounded-lg border border-gray-200 bg-white p-6"
+        className="flex flex-col gap-4 rounded-lg border border-gray-200 bg-white p-6"
       >
-        <h2 className="text-base font-semibold text-gray-900">Create User</h2>
+        <h2 className="text-base font-semibold text-gray-900">Create Admin User</h2>
 
         <div>
           <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-700">
@@ -191,54 +451,18 @@ export default function AdminUsersPage() {
             id="email"
             type="email"
             required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            value={adminEmail}
+            onChange={(e) => setAdminEmail(e.target.value)}
             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
           />
         </div>
 
-        <div>
-          <label htmlFor="role" className="mb-1 block text-sm font-medium text-gray-700">
-            Role
-          </label>
-          <select
-            id="role"
-            value={role}
-            onChange={(e) => setRole(e.target.value as Role)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
-          >
-            <option value="Admins">Admin</option>
-            <option value="Scorekeepers">Scorekeeper</option>
-          </select>
-        </div>
-
-        {role === 'Scorekeepers' && (
-          <div>
-            <label htmlFor="team" className="mb-1 block text-sm font-medium text-gray-700">
-              Team
-            </label>
-            <select
-              id="team"
-              value={teamId}
-              onChange={(e) => setTeamId(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
-            >
-              <option value="">— no team yet —</option>
-              {teams.map((team) => (
-                <option key={team.id} value={team.id}>
-                  {team.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
         <button
           type="submit"
-          disabled={submitting || !email.trim()}
+          disabled={submitting || !adminEmail.trim()}
           className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
         >
-          Create User
+          {submitting ? 'Creating…' : 'Create Admin'}
         </button>
 
         {success && (
@@ -249,83 +473,155 @@ export default function AdminUsersPage() {
         )}
 
         <p className="text-xs text-gray-400">
-          Created users must sign in with the temporary password sent to their email and set a new
-          password on first login.
+          Admin users receive a temporary password by email and must set a new password on first
+          login. Scorekeepers onboard via QR code — use the section above.
         </p>
       </form>
 
       {/* ── Existing users list ── */}
-      <h2 className="mb-3 text-base font-semibold text-gray-900">Existing Users</h2>
+      <section>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-base font-semibold text-gray-900">Existing Users</h2>
+          <div className="flex items-center gap-2">
+            {endGameConfirm ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500">Delete all scorekeepers?</span>
+                <button
+                  type="button"
+                  onClick={handleEndGame}
+                  disabled={endingGame}
+                  className="rounded-md bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {endingGame ? 'Deleting…' : 'Confirm'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEndGameConfirm(false)}
+                  className="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEndGameConfirm(true)}
+                className="rounded-md bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700"
+              >
+                Delete All Scorekeeper Users
+              </button>
+            )}
+            {endGameResult && <p className="text-xs text-gray-500">{endGameResult}</p>}
+            <button
+              type="button"
+              disabled={refreshingUsers || usersLoading}
+              onClick={() => {
+                setRefreshingUsers(true);
+                void loadUsers().finally(() => setRefreshingUsers(false));
+              }}
+              className="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {refreshingUsers ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+        </div>
 
-      {usersError && (
-        <div className="mb-4 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">{usersError}</div>
+        {usersError && (
+          <div className="mb-4 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">
+            {usersError}
+          </div>
+        )}
+
+        {usersLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-indigo-600" />
+          </div>
+        ) : users.length === 0 ? (
+          <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-gray-500">
+            No users found.
+          </div>
+        ) : (
+          <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
+            {users.map((user) => {
+              const synthetic = isSyntheticScorekeeper(user);
+              const isAdmin = user.groups.includes('Admins');
+              const teamId = synthetic ? assignedTeamId(user) : '';
+              const team = teamId ? teams.find((t) => t.id === teamId) : null;
+              const isSelf = user.sub === currentSub;
+              const confirming = deleteConfirmUser === user.username;
+              const deleting = deletingUser === user.username;
+
+              return (
+                <li key={user.username} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                  {/* Identity — read-only */}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-medium text-gray-900">
+                        {synthetic ? (team?.name ?? 'Unassigned scorekeeper') : user.email}
+                      </p>
+                      {synthetic ? (
+                        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-500">
+                          QR Scorekeeper
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">
+                          {isAdmin ? 'Admin' : 'Scorekeeper'}
+                        </span>
+                      )}
+                    </div>
+                    {!synthetic && <p className="text-xs text-gray-400">{user.status}</p>}
+                  </div>
+
+                  {/* Delete — two-step confirm */}
+                  {confirming ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">Delete this user?</span>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteUser(user)}
+                        disabled={deleting}
+                        className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                      >
+                        {deleting ? 'Deleting…' : 'Confirm'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirmUser(null)}
+                        className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setDeleteConfirmUser(user.username)}
+                      disabled={isSelf}
+                      title={isSelf ? "You can't delete your own account" : undefined}
+                      className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Delete
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      {/* ── QR display carousel (portal-style overlay) ── */}
+      {qrDisplayIndex !== null && tokens.length > 0 && (
+        <QrCodeDisplay
+          tokens={tokens}
+          initialIndex={qrDisplayIndex}
+          onClose={() => setQrDisplayIndex(null)}
+        />
       )}
 
-      {usersLoading ? (
-        <div className="flex items-center justify-center py-16">
-          <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-indigo-600" />
-        </div>
-      ) : users.length === 0 ? (
-        <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-gray-500">
-          No users found.
-        </div>
-      ) : (
-        <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
-          {users.map((user) => {
-            const currentRole = userRole(user);
-            const isScorekeeper = currentRole === 'Scorekeepers';
-            const currentTeamId = assignedTeamId(user);
-            const roleChanging = savingRole === user.username;
-            const teamChanging = savingTeam === user.username;
-
-            return (
-              <li key={user.username} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium text-gray-900">{user.email}</p>
-                  <p className="truncate text-xs text-gray-400">{user.status}</p>
-                </div>
-
-                {/* Role selector */}
-                <select
-                  value={currentRole}
-                  disabled={roleChanging || teamChanging}
-                  onChange={(e) => {
-                    void handleRoleChange(user, e.target.value as Role);
-                  }}
-                  className="rounded-md border border-gray-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none disabled:opacity-50"
-                  aria-label={`Role for ${user.email}`}
-                >
-                  <option value="Admins">Admin</option>
-                  <option value="Scorekeepers">Scorekeeper</option>
-                </select>
-
-                {/* Team selector — only for scorekeepers */}
-                {isScorekeeper && (
-                  <select
-                    value={currentTeamId}
-                    disabled={roleChanging || teamChanging}
-                    onChange={(e) => {
-                      void handleTeamChange(user, e.target.value);
-                    }}
-                    className="rounded-md border border-gray-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none disabled:opacity-50"
-                    aria-label={`Team for ${user.email}`}
-                  >
-                    <option value="">— no team —</option>
-                    {teams.map((team) => (
-                      <option key={team.id} value={team.id}>
-                        {team.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-
-                {(roleChanging || teamChanging) && (
-                  <span className="text-xs text-gray-400">Saving…</span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+      {/* ── Print grid overlay ── */}
+      {showPrintGrid && tokens.length > 0 && (
+        <QrCodePrintGrid tokens={tokens} onClose={() => setShowPrintGrid(false)} />
       )}
     </div>
   );

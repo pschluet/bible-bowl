@@ -63,9 +63,7 @@ export default function QuickEntryDrawer({
   const selectedTeam = selectedIdx >= 0 ? sortedTeams[selectedIdx] : null;
   const prevTeam = selectedIdx > 0 ? sortedTeams[selectedIdx - 1] : null;
   const nextTeam =
-    selectedIdx >= 0 && selectedIdx < sortedTeams.length - 1
-      ? sortedTeams[selectedIdx + 1]
-      : null;
+    selectedIdx >= 0 && selectedIdx < sortedTeams.length - 1 ? sortedTeams[selectedIdx + 1] : null;
 
   const existingScore =
     selectedTeam && currentQuestion !== null
@@ -81,13 +79,19 @@ export default function QuickEntryDrawer({
     const delta = e.changedTouches[0].clientX - touchStartX.current;
     touchStartX.current = null;
     if (Math.abs(delta) > 50) {
-      if (delta < 0) onSelectNext(); // swipe left → next church
-      else onSelectPrev();           // swipe right → previous church
+      if (delta < 0)
+        onSelectNext(); // swipe left → next church
+      else onSelectPrev(); // swipe right → previous church
     }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end" role="dialog" aria-modal="true" aria-label="Quick Score Entry">
+    <div
+      className="fixed inset-0 z-50 flex flex-col justify-end"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Quick Score Entry"
+    >
       {/* Backdrop — click to close */}
       <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
 

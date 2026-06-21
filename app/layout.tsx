@@ -6,7 +6,10 @@ import ConfigureAmplify from '@/app/amplify-config';
 import outputs from '@/amplify_outputs.json';
 
 // Strip server-only secrets from the config before passing to the client component.
-const { serverOnly: _serverOnly, ...publicCustom } = (outputs.custom ?? {}) as Record<string, unknown>;
+const { serverOnly: _serverOnly, ...publicCustom } = (outputs.custom ?? {}) as Record<
+  string,
+  unknown
+>;
 const publicOutputs = { ...(outputs as Record<string, unknown>), custom: publicCustom };
 
 const geistSans = Geist({

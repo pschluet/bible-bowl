@@ -1,12 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import type { Schema } from '@/amplify/data/resource';
 import { subscribeLive } from '@/app/lib/liveQuery';
-import TeamPicker from '@/app/components/TeamPicker';
 import ScoreEntry from '@/app/components/ScoreEntry';
+import GameEndedView from '@/app/components/GameEndedView';
 
 type Team = Schema['Team']['type'];
 type Score = Schema['Score']['type'];
@@ -15,9 +15,6 @@ type GameState = Schema['GameState']['type'];
 const client = generateClient<Schema>({ authMode: 'userPool' });
 
 export default function ScorekeeperPage() {
-  const [claiming, setClaiming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   // Raw stream state
   const [userSub, setUserSub] = useState<string | null>(null);
   const [allTeams, setAllTeams] = useState<Team[]>([]);
@@ -34,7 +31,6 @@ export default function ScorekeeperPage() {
     () => allTeams.find((t) => t.scorekeeperUserId === userSub) ?? null,
     [allTeams, userSub]
   );
-  const unclaimedTeams = useMemo(() => allTeams.filter((t) => !t.scorekeeperUserId), [allTeams]);
   const currentQuestion = useMemo(
     () => gameStateItems[0]?.currentQuestion ?? null,
     [gameStateItems]
@@ -65,14 +61,14 @@ export default function ScorekeeperPage() {
       ({ items, isSynced }) => {
         setAllTeams(items);
         if (isSynced) setTeamsSynced(true);
-      },
+      }
     );
     const unsubGs = subscribeLive(
       () => client.models.GameState.observeQuery({ authMode: 'userPool' }),
       ({ items, isSynced }) => {
         setGameStateItems(items);
         if (isSynced) setGameStateSynced(true);
-      },
+      }
     );
     return () => {
       unsubTeam();
@@ -93,29 +89,9 @@ export default function ScorekeeperPage() {
           authMode: 'userPool',
           filter: { teamId: { eq: myTeamId } },
         }),
-      ({ items }) => setTeamScores(items),
+      ({ items }) => setTeamScores(items)
     );
   }, [myTeamId]);
-
-  const handleClaim = useCallback(async (teamId: string) => {
-    setClaiming(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/teams/claim', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ teamId }),
-      });
-      if (!res.ok) {
-        setError('Could not claim team. Please try again.');
-      }
-      // Team stream delivers the updated scorekeeperUserId — no reload needed
-    } catch {
-      setError('Could not claim team. Please try again.');
-    } finally {
-      setClaiming(false);
-    }
-  }, []);
 
   if (loading) {
     return (
@@ -125,11 +101,19 @@ export default function ScorekeeperPage() {
     );
   }
 
+  // Admin pressed End Game — scoringOpen flipped to false via subscription
+  if (gameStateItems[0]?.scoringOpen === false) {
+    return <GameEndedView />;
+  }
+
+  // Signed in as a scorekeeper but no team is bound to this account yet
   if (!myTeam) {
     return (
-      <div className="space-y-4">
-        <TeamPicker unclaimedTeams={unclaimedTeams} onClaim={handleClaim} loading={claiming} />
-        {error && <p className="text-center text-sm text-red-600">{error}</p>}
+      <div className="rounded-xl border border-gray-200 bg-white p-6 text-center text-gray-600">
+        <p className="font-medium">No team assigned</p>
+        <p className="mt-1 text-sm text-gray-400">
+          Contact the event organizer to have your team assigned.
+        </p>
       </div>
     );
   }

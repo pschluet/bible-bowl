@@ -1,5 +1,6 @@
 node_modules
 .next
+.claude
 amplify_outputs.json
 amplify_outputs.json.example
 amplify/.amplify

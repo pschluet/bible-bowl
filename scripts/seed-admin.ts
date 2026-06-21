@@ -86,7 +86,9 @@ async function main() {
     console.log(`\nTemporary password: ${tempPassword}`);
     console.log('Sign in at /login with this password — you will be prompted to set a new one.');
   } else {
-    console.log('User already existed; use Forgot Password at /login to set a new password if needed.');
+    console.log(
+      'User already existed; use Forgot Password at /login to set a new password if needed.'
+    );
   }
 }
 
