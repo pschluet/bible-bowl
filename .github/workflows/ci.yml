@@ -29,10 +29,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Prepare environment
+        run: cp amplify_outputs.json.example amplify_outputs.json
+
       - name: Type check
         run: npx tsc --noEmit
 
       - name: Build
-        run: |
-          cp amplify_outputs.json.example amplify_outputs.json
-          npm run build
+        run: npm run build
