@@ -1,10 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '@/amplify/data/resource';
 import GroupPill from '@/app/components/GroupPill';
-import { scoreId as makeScoreId } from '@/app/lib/constants';
 
 type Team = Schema['Team']['type'];
 
@@ -15,7 +13,6 @@ type ScoreEntryProps = {
   scoreId: string | null;
 };
 
-const client = generateClient<Schema>({ authMode: 'userPool' });
 const OPTIONS = [0, 1, 2, 3];
 
 export default function ScoreEntry({
@@ -35,18 +32,22 @@ export default function ScoreEntry({
     setSubmitting(true);
     setError(null);
     try {
-      // Use a deterministic id so concurrent submits can't create duplicate records.
-      const { errors } = await client.models.Score.create({
-        id: makeScoreId(team.id, currentQuestion),
-        teamId: team.id,
-        questionNumber: currentQuestion,
-        points,
+      const res = await fetch('/api/scorekeeper/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teamId: team.id, questionNumber: currentQuestion, points }),
       });
-      if (errors && errors.length > 0) {
+      const data = await res.json() as { error?: string };
+      if (res.status === 409) {
         // A record already exists for this question (e.g. admin already scored it,
-        // or a duplicate submit race). Treat it as already-scored rather than creating
-        // a second record.
+        // or a duplicate submit race). Treat it as already-scored.
         setError('This question has already been scored.');
+      } else if (!res.ok) {
+        setError(
+          data.error === 'SCORING_CLOSED'
+            ? 'Scoring is now closed.'
+            : 'Could not submit score. Please try again.'
+        );
       } else {
         setSubmittedScore(points);
       }

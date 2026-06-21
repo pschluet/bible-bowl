@@ -3,6 +3,7 @@ import {
   AdminCreateUserCommand,
   AdminAddUserToGroupCommand,
   AdminDeleteUserCommand,
+  AdminUserGlobalSignOutCommand,
   AdminListGroupsForUserCommand,
   ListUsersCommand,
   type UserType,
@@ -200,6 +201,20 @@ export async function DELETE(request: Request) {
       // Non-fatal: proceed with deletion even if team cleanup fails
       console.error('Failed to clear team binding (non-fatal):', err);
     }
+  }
+
+  // Best-effort: revoke active sessions before deletion so existing JWTs stop
+  // working. Must run before delete (user must still exist to be signed out).
+  try {
+    await cognitoClient.send(
+      new AdminUserGlobalSignOutCommand({
+        UserPoolId: USER_POOL_ID,
+        Username: username,
+      })
+    );
+  } catch (err) {
+    // Non-fatal: proceed with deletion even if sign-out fails
+    console.error('AdminUserGlobalSignOut failed (non-fatal):', err);
   }
 
   try {

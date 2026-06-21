@@ -5,12 +5,13 @@ import { generateClient } from 'aws-amplify/data';
 import { getCurrentUser } from 'aws-amplify/auth';
 import type { Schema } from '@/amplify/data/resource';
 import { subscribeLive } from '@/app/lib/liveQuery';
-import { compareTeamOrder } from '@/app/lib/constants';
+import { GAME_STATE_ID, compareTeamOrder } from '@/app/lib/constants';
 import { SCOREKEEPER_EMAIL_DOMAIN } from '@/app/lib/cognito';
 import QrCodeDisplay, { type QrToken } from '@/app/components/QrCodeDisplay';
 import QrCodePrintGrid from '@/app/components/QrCodePrintGrid';
 
 type Team = Schema['Team']['type'];
+type GameState = Schema['GameState']['type'];
 
 interface CognitoUser {
   username: string;
@@ -37,6 +38,10 @@ export default function AdminUsersPage() {
   const [qrDisplayIndex, setQrDisplayIndex] = useState<number | null>(null);
   const [showPrintGrid, setShowPrintGrid] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
+
+  // ── GameState (scoringOpen toggle) ────────────────────────────────────────
+  const [gameState, setGameState] = useState<GameState | null>(null);
+  const [togglingEntry, setTogglingEntry] = useState(false);
 
   // End Game
   const [endingGame, setEndingGame] = useState(false);
@@ -94,6 +99,14 @@ export default function AdminUsersPage() {
       .then(({ userId }) => setCurrentSub(userId))
       .catch(() => {});
   }, [loadTeams, loadUsers]);
+
+  // ── Live GameState subscription ───────────────────────────────────────────
+  useEffect(() => {
+    return subscribeLive(
+      () => client.models.GameState.observeQuery({ authMode: 'userPool' }),
+      ({ items }) => setGameState(items[0] ?? null),
+    );
+  }, []);
 
   // ── Live token subscription ────────────────────────────────────────────────
   // Hydrates on mount AND streams UNUSED→CONSUMED status changes in real-time
@@ -178,6 +191,22 @@ export default function AdminUsersPage() {
       setGenerateError(err instanceof Error ? err.message : 'Failed to generate QR codes.');
     } finally {
       setGenerating(false);
+    }
+  }
+
+  // ── Toggle scorekeeper entry ───────────────────────────────────────────────
+  async function handleToggleEntry() {
+    if (!gameState) return;
+    setTogglingEntry(true);
+    try {
+      const entryDisabled = gameState.scoringOpen === false;
+      await client.models.GameState.update(
+        { id: GAME_STATE_ID, scoringOpen: entryDisabled },
+        { authMode: 'userPool' }
+      );
+      // Subscription delivers the update — no manual state set needed
+    } finally {
+      setTogglingEntry(false);
     }
   }
 
@@ -284,7 +313,7 @@ export default function AdminUsersPage() {
 
       {/* ── Scorekeeper Onboarding ── */}
       <section className="rounded-lg border border-gray-200 bg-white p-6">
-        {/* Heading row */}
+        {/* Heading */}
         <div className="mb-4">
           <h2 className="text-base font-semibold text-gray-900">Scorekeeper Onboarding</h2>
           <p className="mt-0.5 text-xs text-gray-500">
@@ -292,7 +321,7 @@ export default function AdminUsersPage() {
           </p>
         </div>
 
-        {/* Button toolbar — Generate/Show/Print on the left, End Game on the right */}
+        {/* Generate/Show/Print buttons */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <button
             type="button"
@@ -325,42 +354,45 @@ export default function AdminUsersPage() {
               </button>
             </>
           )}
+        </div>
 
-          {/* End Game — pushed to the far right */}
-          <div className="ml-auto flex flex-col items-end gap-1">
-            {endGameConfirm ? (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-500">Delete all scorekeepers?</span>
-                <button
-                  type="button"
-                  onClick={handleEndGame}
-                  disabled={endingGame}
-                  className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-                >
-                  {endingGame ? 'Ending…' : 'Confirm'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEndGameConfirm(false)}
-                  className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
+        {/* Toggle scorekeeper entry */}
+        {(() => {
+          const gameExists = gameState !== null;
+          const entryEnabled = gameState?.scoringOpen !== false;
+          return (
+            <div className="mb-4">
               <button
                 type="button"
-                onClick={() => setEndGameConfirm(true)}
-                className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50"
+                role="switch"
+                aria-checked={entryEnabled}
+                onClick={() => void handleToggleEntry()}
+                disabled={togglingEntry || !gameExists}
+                title={!gameExists ? 'Initialize a game first' : undefined}
+                className="flex items-center gap-2 disabled:opacity-50"
               >
-                End Game
+                {/* Track */}
+                <span
+                  className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors duration-200 ${
+                    entryEnabled ? 'bg-green-500' : 'bg-gray-300'
+                  }`}
+                >
+                  {/* Thumb */}
+                  <span
+                    className={`inline-block h-4 w-4 translate-y-0.5 rounded-full bg-white shadow transition-transform duration-200 ${
+                      entryEnabled ? 'translate-x-4' : 'translate-x-0.5'
+                    }`}
+                  />
+                </span>
+                <span className="text-xs font-medium text-gray-700">
+                  Scorekeeper Entry {entryEnabled ? 'Enabled' : 'Disabled'}
+                </span>
               </button>
-            )}
-            {endGameResult && (
-              <p className="text-xs text-gray-500">{endGameResult}</p>
-            )}
-          </div>
-        </div>
+            </div>
+          );
+        })()}
+
+
 
         {generateError && (
           <div className="mb-4 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">
@@ -458,17 +490,50 @@ export default function AdminUsersPage() {
       <section>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-base font-semibold text-gray-900">Existing Users</h2>
-          <button
-            type="button"
-            disabled={refreshingUsers || usersLoading}
-            onClick={() => {
-              setRefreshingUsers(true);
-              void loadUsers().finally(() => setRefreshingUsers(false));
-            }}
-            className="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-          >
-            {refreshingUsers ? 'Refreshing…' : 'Refresh'}
-          </button>
+          <div className="flex items-center gap-2">
+            {endGameConfirm ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500">Delete all scorekeepers?</span>
+                <button
+                  type="button"
+                  onClick={handleEndGame}
+                  disabled={endingGame}
+                  className="rounded-md bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {endingGame ? 'Deleting…' : 'Confirm'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEndGameConfirm(false)}
+                  className="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEndGameConfirm(true)}
+                className="rounded-md bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700"
+              >
+                Delete All Scorekeeper Users
+              </button>
+            )}
+            {endGameResult && (
+              <p className="text-xs text-gray-500">{endGameResult}</p>
+            )}
+            <button
+              type="button"
+              disabled={refreshingUsers || usersLoading}
+              onClick={() => {
+                setRefreshingUsers(true);
+                void loadUsers().finally(() => setRefreshingUsers(false));
+              }}
+              className="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {refreshingUsers ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
         </div>
 
         {usersError && (

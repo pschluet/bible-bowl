@@ -12,10 +12,11 @@ import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
  * Auth summary:
  *  - Guests (viewers) and authenticated users can READ everything.
  *  - Admins can CRUD everything.
- *  - Scorekeepers can CREATE their own Score records (via `allow.owner()`);
- *    they cannot UPDATE past scores (owner gets create+read only).
- *  - `allow.publicApiKey()` on Team and OnboardingToken is used exclusively by
- *    Next.js server routes after validating the caller's identity in the handler.
+ *  - Scorekeepers create Score records via the /api/scorekeeper/score route,
+ *    which validates the session and game state before writing via the API key.
+ *    Scorekeepers cannot update past scores — the server route only creates.
+ *  - `allow.publicApiKey()` on Team, OnboardingToken, and Score is used exclusively
+ *    by Next.js server routes after validating the caller's identity in the handler.
  *    The API key is public in amplify_outputs.json but write operations are
  *    enforced by route-handler logic (admin session checks / token validation).
  */
@@ -23,6 +24,10 @@ const schema = a.schema({
   GameState: a
     .model({
       currentQuestion: a.integer().required(),
+      // Explicit scoring gate. true = scoring open; false = closed (e.g. end game pressed).
+      // Null/absent is treated as open by clients to preserve backward-compat with
+      // records created before this field was added.
+      scoringOpen: a.boolean(),
     })
     .authorization((allow) => [
       allow.guest().to(['read']),
@@ -59,9 +64,10 @@ const schema = a.schema({
       allow.guest().to(['read']),
       allow.authenticated().to(['read']),
       allow.groups(['Admins']).to(['create', 'read', 'update', 'delete']),
-      // Scorekeepers can create new scores (owner is auto-set to their Cognito sub).
-      // They cannot update past scores: owner only gets create + read.
-      allow.owner().to(['create', 'read']),
+      // Scorekeepers create scores via the /api/scorekeeper/score route, which
+      // validates session + game state before writing. The API key is the write
+      // credential; direct owner-based client writes are intentionally removed.
+      allow.publicApiKey().to(['create', 'read']),
     ]),
 
   /**

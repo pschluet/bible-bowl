@@ -196,7 +196,7 @@ export default function AdminScoresPage() {
     setError(null);
     try {
       await client.models.GameState.create(
-        { id: GAME_STATE_ID, currentQuestion: 1 },
+        { id: GAME_STATE_ID, currentQuestion: 1, scoringOpen: true },
         { authMode: 'userPool' }
       );
       // Stream delivers the new GameState — no reload needed

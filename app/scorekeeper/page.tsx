@@ -6,6 +6,7 @@ import { fetchAuthSession } from 'aws-amplify/auth';
 import type { Schema } from '@/amplify/data/resource';
 import { subscribeLive } from '@/app/lib/liveQuery';
 import ScoreEntry from '@/app/components/ScoreEntry';
+import GameEndedView from '@/app/components/GameEndedView';
 
 type Team = Schema['Team']['type'];
 type Score = Schema['Score']['type'];
@@ -98,6 +99,11 @@ export default function ScorekeeperPage() {
         <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-indigo-600" />
       </div>
     );
+  }
+
+  // Admin pressed End Game — scoringOpen flipped to false via subscription
+  if (gameStateItems[0]?.scoringOpen === false) {
+    return <GameEndedView />;
   }
 
   // Signed in as a scorekeeper but no team is bound to this account yet
