@@ -89,7 +89,8 @@ cfnUserPool.addPropertyOverride('AdminCreateUserConfig', {
 // the browser (see app/layout.tsx), so these never appear in client bundles.
 backend.addOutput({
   custom: {
-    serverOnly: { // not exposed to the browser
+    serverOnly: {
+      // not exposed to the browser
       cognitoAdminAccessKeyId: accessKey.ref,
       cognitoAdminSecretAccessKey: accessKey.attrSecretAccessKey,
     },

@@ -66,7 +66,9 @@ export async function GET() {
             Username: username,
           })
         );
-        groups = (groupsRes.Groups ?? []).map((g: { GroupName?: string }) => g.GroupName ?? '').filter(Boolean);
+        groups = (groupsRes.Groups ?? [])
+          .map((g: { GroupName?: string }) => g.GroupName ?? '')
+          .filter(Boolean);
       } catch (err) {
         console.error(`Failed to fetch groups for user ${username}:`, err);
       }

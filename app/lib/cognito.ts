@@ -31,9 +31,8 @@ export const USER_POOL_ID: string = outputs.auth.user_pool_id;
  * amplify_outputs.json at deploy time. Throws if the credentials are missing.
  */
 export function makeCognitoClient(): CognitoIdentityProviderClient {
-  const serverOnly = (
-    outputs as { custom?: { serverOnly?: Record<string, string> } }
-  ).custom?.serverOnly;
+  const serverOnly = (outputs as { custom?: { serverOnly?: Record<string, string> } }).custom
+    ?.serverOnly;
   const accessKeyId = serverOnly?.cognitoAdminAccessKeyId;
   const secretAccessKey = serverOnly?.cognitoAdminSecretAccessKey;
   if (!accessKeyId || !secretAccessKey) {

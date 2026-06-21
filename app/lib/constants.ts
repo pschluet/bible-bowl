@@ -26,8 +26,7 @@ export const GROUP_LABELS: Record<GroupType, string> = {
  * Using a content-derived id makes concurrent creates for the same
  * (teamId, questionNumber) fail atomically — no duplicate records possible.
  */
-export const scoreId = (teamId: string, questionNumber: number) =>
-  `${teamId}#${questionNumber}`;
+export const scoreId = (teamId: string, questionNumber: number) => `${teamId}#${questionNumber}`;
 
 /**
  * Fetch ALL pages of an Amplify list query, working around the 100-item default
@@ -55,10 +54,7 @@ export async function listAll<T>(
  * Appends the human-readable group type when available.
  * Example: "Faith Community — Pre-Teen"
  */
-export function teamOptionLabel(team: {
-  name: string;
-  groupType?: string | null;
-}): string {
+export function teamOptionLabel(team: { name: string; groupType?: string | null }): string {
   if (team.groupType && team.groupType in GROUP_LABELS) {
     return `${team.name} — ${GROUP_LABELS[team.groupType as GroupType]}`;
   }

@@ -74,7 +74,9 @@ function TeamRow({
           onClick={() => onToggle(team.id)}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
-          <span className="min-w-0 flex-1 break-words line-clamp-2 font-medium text-gray-900">{team.name}</span>
+          <span className="min-w-0 flex-1 break-words line-clamp-2 font-medium text-gray-900">
+            {team.name}
+          </span>
           <LatestBadge history={team.history} />
           <span className="text-2xl font-bold tabular-nums text-gray-900">{team.total}</span>
           <span
@@ -144,7 +146,11 @@ function GroupSection({
   return (
     <div className="mt-3">
       <div className="px-4 pb-1 pt-2">
-        <span className={groupType ? 'text-lg font-bold text-gray-700' : 'text-sm font-semibold text-gray-500'}>
+        <span
+          className={
+            groupType ? 'text-lg font-bold text-gray-700' : 'text-sm font-semibold text-gray-500'
+          }
+        >
           {label}
         </span>
       </div>
@@ -208,9 +214,10 @@ export default function Leaderboard({
   for (const g of GROUP_TYPES) byGroup.set(g, []);
   byGroup.set('Other', []);
   for (const team of teams) {
-    const key = team.groupType && GROUP_TYPES.includes(team.groupType as (typeof GROUP_TYPES)[number])
-      ? team.groupType
-      : 'Other';
+    const key =
+      team.groupType && GROUP_TYPES.includes(team.groupType as (typeof GROUP_TYPES)[number])
+        ? team.groupType
+        : 'Other';
     byGroup.get(key)!.push(team);
   }
 

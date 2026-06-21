@@ -58,12 +58,16 @@ export default function LoginPage() {
       </div>
 
       {/* hideSignUp: scorekeepers onboard via QR scan, not self-signup */}
-      <Authenticator formFields={formFields} hideSignUp>{() => <RedirectOnAuth />}</Authenticator>
+      <Authenticator formFields={formFields} hideSignUp>
+        {() => <RedirectOnAuth />}
+      </Authenticator>
 
       <p className="mt-6 max-w-xs text-center text-sm text-gray-500">
-        Scorekeepers: scan your QR code to sign in.
-        Viewers don&apos;t need to log in — go to the{' '}
-        <Link href="/" className="text-indigo-600 underline">homepage</Link>.
+        Scorekeepers: scan your QR code to sign in. Viewers don&apos;t need to log in — go to the{' '}
+        <Link href="/" className="text-indigo-600 underline">
+          homepage
+        </Link>
+        .
       </p>
     </main>
   );

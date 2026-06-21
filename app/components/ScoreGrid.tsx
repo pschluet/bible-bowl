@@ -128,9 +128,7 @@ export default function ScoreGrid({
                 {/* Sticky name cell — left accent bar when selected */}
                 <td
                   className={`sticky left-0 z-10 border border-gray-200 px-3 py-2 font-medium text-gray-900 ${
-                    isSelected
-                      ? 'border-l-4 border-l-indigo-500 bg-indigo-50'
-                      : 'bg-white'
+                    isSelected ? 'border-l-4 border-l-indigo-500 bg-indigo-50' : 'bg-white'
                   }`}
                 >
                   <div className="flex items-center gap-1.5">
@@ -144,9 +142,7 @@ export default function ScoreGrid({
                   const cellKey = `${team.id}:${q}`;
                   const isEditing = editing === cellKey;
                   const isCurrent = q === currentQuestion;
-                  const isFlashing =
-                    isCurrent &&
-                    recentEntry?.teamId === team.id;
+                  const isFlashing = isCurrent && recentEntry?.teamId === team.id;
                   // Selected row: bg-indigo-50; current-question column: bg-indigo-50;
                   // intersection of both: bg-indigo-100 (slightly darker to distinguish both)
                   const cellBg =

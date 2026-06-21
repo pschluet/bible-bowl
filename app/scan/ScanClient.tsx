@@ -15,19 +15,17 @@ import { useRouter } from 'next/navigation';
 import { signIn, fetchAuthSession } from 'aws-amplify/auth';
 
 type Stage =
-  | 'checking'     // checking for an existing session
-  | 'signing-in'   // exchanging token and calling signIn
-  | 'redirecting'  // sign-in succeeded
-  | 'no-token'     // arrived at /scan with no token query param
-  | 'error';       // failure with a user-friendly message
+  | 'checking' // checking for an existing session
+  | 'signing-in' // exchanging token and calling signIn
+  | 'redirecting' // sign-in succeeded
+  | 'no-token' // arrived at /scan with no token query param
+  | 'error'; // failure with a user-friendly message
 
 const FRIENDLY: Record<string, string> = {
-  INVALID_TOKEN:
-    'This QR code is not valid. Please ask the event organizer for a new one.',
+  INVALID_TOKEN: 'This QR code is not valid. Please ask the event organizer for a new one.',
   TOKEN_ALREADY_USED:
     'This QR code has already been used. Contact the organizer if you need to sign in again.',
-  TOKEN_EXPIRED:
-    'This QR code has expired. Ask the event organizer to regenerate your QR code.',
+  TOKEN_EXPIRED: 'This QR code has expired. Ask the event organizer to regenerate your QR code.',
 };
 
 export default function ScanClient({ token }: { token: string | null }) {
@@ -71,8 +69,7 @@ export default function ScanClient({ token }: { token: string | null }) {
         const existing = await fetchAuthSession({ forceRefresh: false });
         if (existing.tokens?.accessToken) {
           const groups =
-            (existing.tokens.accessToken.payload['cognito:groups'] as string[] | undefined) ??
-            [];
+            (existing.tokens.accessToken.payload['cognito:groups'] as string[] | undefined) ?? [];
           if (groups.includes('Scorekeepers')) {
             setStage('redirecting');
             router.replace('/scorekeeper');
@@ -113,9 +110,7 @@ export default function ScanClient({ token }: { token: string | null }) {
           if (await redirectIfSignedIn()) return;
           const code = data.error ?? 'UNKNOWN';
           setErrorMessage(
-            FRIENDLY[code] ??
-              data.message ??
-              'Sign-in failed. Contact the event organizer.'
+            FRIENDLY[code] ?? data.message ?? 'Sign-in failed. Contact the event organizer.'
           );
           setStage('error');
           return;
@@ -124,9 +119,7 @@ export default function ScanClient({ token }: { token: string | null }) {
         username = data.username!;
         password = data.password!;
       } catch {
-        setErrorMessage(
-          'Could not reach the server. Check your connection and try again.'
-        );
+        setErrorMessage('Could not reach the server. Check your connection and try again.');
         setStage('error');
         return;
       }

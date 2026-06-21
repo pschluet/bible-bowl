@@ -41,8 +41,15 @@ export async function POST(request: Request) {
   if (!teamId || typeof teamId !== 'string') {
     return NextResponse.json({ error: 'teamId is required' }, { status: 400 });
   }
-  if (typeof questionNumber !== 'number' || !Number.isInteger(questionNumber) || questionNumber < 1) {
-    return NextResponse.json({ error: 'questionNumber must be a positive integer' }, { status: 400 });
+  if (
+    typeof questionNumber !== 'number' ||
+    !Number.isInteger(questionNumber) ||
+    questionNumber < 1
+  ) {
+    return NextResponse.json(
+      { error: 'questionNumber must be a positive integer' },
+      { status: 400 }
+    );
   }
   if (typeof points !== 'number' || ![0, 1, 2, 3].includes(points)) {
     return NextResponse.json({ error: 'points must be 0, 1, 2, or 3' }, { status: 400 });

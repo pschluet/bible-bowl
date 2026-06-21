@@ -37,10 +37,7 @@ import outputs from '@/amplify_outputs.json';
 import type { Schema } from '@/amplify/data/resource';
 import { makeCognitoClient, scorekeeperUsername, USER_POOL_ID } from '@/app/lib/cognito';
 
-function attr(
-  attrs: Array<{ Name?: string; Value?: string }> | undefined,
-  name: string
-): string {
+function attr(attrs: Array<{ Name?: string; Value?: string }> | undefined, name: string): string {
   return attrs?.find((a) => a.Name === name)?.Value ?? '';
 }
 
@@ -67,7 +64,10 @@ export async function POST(request: Request) {
   const { data: tokenRow } = await dataClient.models.OnboardingToken.get({ tokenId: token });
 
   if (!tokenRow) {
-    return NextResponse.json({ error: 'INVALID_TOKEN', message: 'QR code not found.' }, { status: 404 });
+    return NextResponse.json(
+      { error: 'INVALID_TOKEN', message: 'QR code not found.' },
+      { status: 404 }
+    );
   }
   if (tokenRow.status === 'CONSUMED') {
     return NextResponse.json(
@@ -95,7 +95,10 @@ export async function POST(request: Request) {
   // 3. Resolve the team
   const { data: team } = await dataClient.models.Team.get({ id: tokenRow.teamId });
   if (!team) {
-    return NextResponse.json({ error: 'TEAM_NOT_FOUND', message: 'Team not found.' }, { status: 404 });
+    return NextResponse.json(
+      { error: 'TEAM_NOT_FOUND', message: 'Team not found.' },
+      { status: 404 }
+    );
   }
 
   const username = scorekeeperUsername(team.id);

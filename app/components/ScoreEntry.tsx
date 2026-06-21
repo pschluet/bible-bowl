@@ -37,7 +37,7 @@ export default function ScoreEntry({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ teamId: team.id, questionNumber: currentQuestion, points }),
       });
-      const data = await res.json() as { error?: string };
+      const data = (await res.json()) as { error?: string };
       if (res.status === 409) {
         // A record already exists for this question (e.g. admin already scored it,
         // or a duplicate submit race). Treat it as already-scored.

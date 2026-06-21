@@ -61,14 +61,14 @@ export default function ScorekeeperPage() {
       ({ items, isSynced }) => {
         setAllTeams(items);
         if (isSynced) setTeamsSynced(true);
-      },
+      }
     );
     const unsubGs = subscribeLive(
       () => client.models.GameState.observeQuery({ authMode: 'userPool' }),
       ({ items, isSynced }) => {
         setGameStateItems(items);
         if (isSynced) setGameStateSynced(true);
-      },
+      }
     );
     return () => {
       unsubTeam();
@@ -89,7 +89,7 @@ export default function ScorekeeperPage() {
           authMode: 'userPool',
           filter: { teamId: { eq: myTeamId } },
         }),
-      ({ items }) => setTeamScores(items),
+      ({ items }) => setTeamScores(items)
     );
   }, [myTeamId]);
 

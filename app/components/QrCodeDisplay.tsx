@@ -27,9 +27,7 @@ interface Props {
 }
 
 export default function QrCodeDisplay({ tokens, initialIndex = 0, onClose }: Props) {
-  const [index, setIndex] = useState(
-    Math.min(Math.max(0, initialIndex), tokens.length - 1)
-  );
+  const [index, setIndex] = useState(Math.min(Math.max(0, initialIndex), tokens.length - 1));
 
   const token = tokens[index];
 
@@ -39,8 +37,7 @@ export default function QrCodeDisplay({ tokens, initialIndex = 0, onClose }: Pro
       if (e.key === 'Escape') onClose();
       if (e.key === 'ArrowRight' || e.key === 'ArrowDown')
         setIndex((i) => Math.min(i + 1, tokens.length - 1));
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp')
-        setIndex((i) => Math.max(i - 1, 0));
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') setIndex((i) => Math.max(i - 1, 0));
     }
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
@@ -95,12 +92,7 @@ export default function QrCodeDisplay({ tokens, initialIndex = 0, onClose }: Pro
 
         {/* QR code */}
         <div className="rounded-xl border border-gray-100 p-3 shadow-inner">
-          <QRCodeCanvas
-            value={deepLink}
-            size={240}
-            level="M"
-            marginSize={1}
-          />
+          <QRCodeCanvas value={deepLink} size={240} level="M" marginSize={1} />
         </div>
 
         <p className="max-w-[240px] break-all text-center font-mono text-[10px] text-gray-300">

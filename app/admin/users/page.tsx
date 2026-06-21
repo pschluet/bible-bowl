@@ -104,7 +104,7 @@ export default function AdminUsersPage() {
   useEffect(() => {
     return subscribeLive(
       () => client.models.GameState.observeQuery({ authMode: 'userPool' }),
-      ({ items }) => setGameState(items[0] ?? null),
+      ({ items }) => setGameState(items[0] ?? null)
     );
   }, []);
 
@@ -300,9 +300,7 @@ export default function AdminUsersPage() {
     }
     const byId = teams.find((t) => t.scorekeeperUserId === user.sub);
     if (byId) return byId.id;
-    const byEmail = teams.find(
-      (t) => !t.scorekeeperUserId && t.scorekeeperEmail === user.email
-    );
+    const byEmail = teams.find((t) => !t.scorekeeperUserId && t.scorekeeperEmail === user.email);
     return byEmail?.id ?? '';
   }
 
@@ -332,8 +330,8 @@ export default function AdminUsersPage() {
             {generating
               ? 'Generating…'
               : tokens.length > 0
-              ? 'Regenerate QR Codes'
-              : 'Generate QR Codes'}
+                ? 'Regenerate QR Codes'
+                : 'Generate QR Codes'}
           </button>
 
           {tokens.length > 0 && (
@@ -392,8 +390,6 @@ export default function AdminUsersPage() {
           );
         })()}
 
-
-
         {generateError && (
           <div className="mb-4 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">
             {generateError}
@@ -409,12 +405,8 @@ export default function AdminUsersPage() {
                 className="flex items-center justify-between gap-3 px-4 py-2.5"
               >
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-gray-900">
-                    {token.teamName}
-                  </p>
-                  {token.groupType && (
-                    <p className="text-xs text-gray-400">{token.groupType}</p>
-                  )}
+                  <p className="truncate text-sm font-medium text-gray-900">{token.teamName}</p>
+                  {token.groupType && <p className="text-xs text-gray-400">{token.groupType}</p>}
                 </div>
                 <span
                   className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
@@ -519,9 +511,7 @@ export default function AdminUsersPage() {
                 Delete All Scorekeeper Users
               </button>
             )}
-            {endGameResult && (
-              <p className="text-xs text-gray-500">{endGameResult}</p>
-            )}
+            {endGameResult && <p className="text-xs text-gray-500">{endGameResult}</p>}
             <button
               type="button"
               disabled={refreshingUsers || usersLoading}
@@ -567,9 +557,7 @@ export default function AdminUsersPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="font-medium text-gray-900">
-                        {synthetic
-                          ? (team?.name ?? 'Unassigned scorekeeper')
-                          : user.email}
+                        {synthetic ? (team?.name ?? 'Unassigned scorekeeper') : user.email}
                       </p>
                       {synthetic ? (
                         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-500">
@@ -581,9 +569,7 @@ export default function AdminUsersPage() {
                         </span>
                       )}
                     </div>
-                    {!synthetic && (
-                      <p className="text-xs text-gray-400">{user.status}</p>
-                    )}
+                    {!synthetic && <p className="text-xs text-gray-400">{user.status}</p>}
                   </div>
 
                   {/* Delete — two-step confirm */}
@@ -635,10 +621,7 @@ export default function AdminUsersPage() {
 
       {/* ── Print grid overlay ── */}
       {showPrintGrid && tokens.length > 0 && (
-        <QrCodePrintGrid
-          tokens={tokens}
-          onClose={() => setShowPrintGrid(false)}
-        />
+        <QrCodePrintGrid tokens={tokens} onClose={() => setShowPrintGrid(false)} />
       )}
     </div>
   );

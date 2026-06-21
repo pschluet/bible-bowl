@@ -7,7 +7,10 @@ import type { Schema } from '@/amplify/data/resource';
 import { subscribeLive } from '@/app/lib/liveQuery';
 import Link from 'next/link';
 import { QRCodeSVG } from 'qrcode.react';
-import Leaderboard, { type LeaderboardTeam, type ScoreHistoryEntry } from '@/app/components/Leaderboard';
+import Leaderboard, {
+  type LeaderboardTeam,
+  type ScoreHistoryEntry,
+} from '@/app/components/Leaderboard';
 
 const FAVORITE_KEY = 'bb_favorite';
 const SITE_URL = 'https://bible.pauldev.io/';
@@ -83,7 +86,7 @@ export default function ViewerPage() {
       ({ items, isSynced }) => {
         setRawTeams(items);
         if (isSynced) setTeamsSynced(true);
-      },
+      }
     );
   }, [authMode]);
 
@@ -96,7 +99,7 @@ export default function ViewerPage() {
       ({ items, isSynced }) => {
         setRawScores(items);
         if (isSynced) setScoresSynced(true);
-      },
+      }
     );
   }, [authMode]);
 
@@ -106,7 +109,7 @@ export default function ViewerPage() {
     const mode = authMode;
     return subscribeLive(
       () => client.models.GameState.observeQuery({ authMode: mode }),
-      ({ items }) => setCurrentQuestion(items[0]?.currentQuestion ?? null),
+      ({ items }) => setCurrentQuestion(items[0]?.currentQuestion ?? null)
     );
   }, [authMode]);
 
