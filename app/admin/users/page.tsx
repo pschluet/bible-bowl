@@ -135,7 +135,7 @@ export default function AdminUsersPage() {
         // Group all tokens by teamId, then pick the best one per team:
         // • prefer the UNUSED token (consume-before-create means at most one)
         // • fall back to the most-recent CONSUMED token so "Used" badges still show
-        const byTeam = new Map<string, typeof items[number]>();
+        const byTeam = new Map<string, (typeof items)[number]>();
         for (const item of items) {
           const existing = byTeam.get(item.teamId);
           if (!existing) {
@@ -331,319 +331,319 @@ export default function AdminUsersPage() {
   // ── render ─────────────────────────────────────────────────────────────────
   return (
     <div className="mx-auto max-w-2xl space-y-8">
-      <h1 className="text-2xl font-bold text-gray-900">Users</h1>
+      {/* Everything below is hidden on print — only the QR print grid overlay should render on paper */}
+      <div className="space-y-8 print:hidden">
+        <h1 className="text-2xl font-bold text-gray-900">Users</h1>
 
-      {/* ── Scorekeeper Onboarding ── */}
-      <section className="rounded-lg border border-gray-200 bg-white p-6">
-        {/* Heading */}
-        <div className="mb-4">
-          <h2 className="text-base font-semibold text-gray-900">Scorekeeper Onboarding</h2>
-          <p className="mt-0.5 text-xs text-gray-500">
-            Generate one QR code per team. Scorekeepers scan the code to sign in automatically.
-          </p>
-        </div>
-
-        {/* Generate/Show/Print buttons */}
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={handleGenerate}
-            disabled={generating}
-            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {generating
-              ? 'Generating…'
-              : tokens.length > 0
-                ? 'Regenerate QR Codes'
-                : 'Generate QR Codes'}
-          </button>
-
-          {tokens.length > 0 && (
-            <>
-              <button
-                type="button"
-                onClick={() => setQrDisplayIndex(0)}
-                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                Show All QR Codes
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowPrintGrid(true)}
-                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                Print All
-              </button>
-            </>
-          )}
-        </div>
-
-        {/* Toggle scorekeeper entry */}
-        {(() => {
-          const gameExists = gameState !== null;
-          const entryEnabled = gameState?.scoringOpen !== false;
-          return (
-            <div className="mb-4">
-              <button
-                type="button"
-                role="switch"
-                aria-checked={entryEnabled}
-                onClick={() => void handleToggleEntry()}
-                disabled={togglingEntry || !gameExists}
-                title={!gameExists ? 'Initialize a game first' : undefined}
-                className="flex items-center gap-2 disabled:opacity-50"
-              >
-                {/* Track */}
-                <span
-                  className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors duration-200 ${
-                    entryEnabled ? 'bg-green-500' : 'bg-gray-300'
-                  }`}
-                >
-                  {/* Thumb */}
-                  <span
-                    className={`inline-block h-4 w-4 translate-y-0.5 rounded-full bg-white shadow transition-transform duration-200 ${
-                      entryEnabled ? 'translate-x-4' : 'translate-x-0.5'
-                    }`}
-                  />
-                </span>
-                <span className="text-xs font-medium text-gray-700">
-                  Scorekeeper Entry {entryEnabled ? 'Enabled' : 'Disabled'}
-                </span>
-              </button>
-            </div>
-          );
-        })()}
-
-        {generateError && (
-          <div className="mb-4 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">
-            {generateError}
+        {/* ── Scorekeeper Onboarding ── */}
+        <section className="rounded-lg border border-gray-200 bg-white p-6">
+          {/* Heading */}
+          <div className="mb-4">
+            <h2 className="text-base font-semibold text-gray-900">Scorekeeper Onboarding</h2>
+            <p className="mt-0.5 text-xs text-gray-500">
+              Generate one QR code per team. Scorekeepers scan the code to sign in automatically.
+            </p>
           </div>
-        )}
 
-        {/* Per-team token list */}
-        {tokens.length > 0 && (
-          <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
-            {tokens.map((token, idx) => (
-              <li
-                key={token.tokenId}
-                className="flex flex-wrap items-center gap-3 px-4 py-2.5"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-gray-900">{token.teamName}</p>
-                  {token.groupType && <p className="text-xs text-gray-400">{token.groupType}</p>}
-                </div>
-                <span
-                  className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
-                    token.status === 'UNUSED'
-                      ? 'bg-green-100 text-green-700'
-                      : 'bg-gray-100 text-gray-500'
-                  }`}
-                >
-                  {token.status === 'UNUSED' ? 'Available' : 'Used'}
-                </span>
-
-                {/* Per-team regenerate — fires immediately, no confirm */}
-                <button
-                  type="button"
-                  onClick={() => void handleRegenerateTeam(token.teamId)}
-                  disabled={regeneratingTeam === token.teamId}
-                  className="shrink-0 rounded-md border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
-                >
-                  {regeneratingTeam === token.teamId ? 'Regenerating…' : 'Regenerate'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setQrDisplayIndex(idx)}
-                  className="shrink-0 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
-                >
-                  Show QR
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {tokens.length === 0 && !generating && (
-          <p className="text-sm text-gray-400">
-            No QR codes generated yet. Click &quot;Generate QR Codes&quot; to create them.
-          </p>
-        )}
-      </section>
-
-      {/* ── Create Admin User form ── */}
-      <form
-        onSubmit={handleSubmit}
-        className="flex flex-col gap-4 rounded-lg border border-gray-200 bg-white p-6"
-      >
-        <h2 className="text-base font-semibold text-gray-900">Create Admin User</h2>
-
-        <div>
-          <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-700">
-            Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            required
-            value={adminEmail}
-            onChange={(e) => setAdminEmail(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
-          />
-        </div>
-
-        <button
-          type="submit"
-          disabled={submitting || !adminEmail.trim()}
-          className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-        >
-          {submitting ? 'Creating…' : 'Create Admin'}
-        </button>
-
-        {success && (
-          <div className="rounded-md bg-green-50 px-4 py-2 text-sm text-green-700">{success}</div>
-        )}
-        {error && (
-          <div className="rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>
-        )}
-
-        <p className="text-xs text-gray-400">
-          Admin users receive a temporary password by email and must set a new password on first
-          login. Scorekeepers onboard via QR code — use the section above.
-        </p>
-      </form>
-
-      {/* ── Existing users list ── */}
-      <section>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-gray-900">Existing Users</h2>
-          <div className="flex items-center gap-2">
-            {endGameConfirm ? (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-500">Delete all scorekeepers?</span>
-                <button
-                  type="button"
-                  onClick={handleEndGame}
-                  disabled={endingGame}
-                  className="rounded-md bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-                >
-                  {endingGame ? 'Deleting…' : 'Confirm'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEndGameConfirm(false)}
-                  className="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setEndGameConfirm(true)}
-                className="rounded-md bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700"
-              >
-                Delete All Scorekeeper Users
-              </button>
-            )}
-            {endGameResult && <p className="text-xs text-gray-500">{endGameResult}</p>}
+          {/* Generate/Show/Print buttons */}
+          <div className="mb-4 flex flex-wrap items-center gap-3">
             <button
               type="button"
-              disabled={refreshingUsers || usersLoading}
-              onClick={() => {
-                setRefreshingUsers(true);
-                void loadUsers().finally(() => setRefreshingUsers(false));
-              }}
-              className="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              onClick={handleGenerate}
+              disabled={generating}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
             >
-              {refreshingUsers ? 'Refreshing…' : 'Refresh'}
+              {generating
+                ? 'Generating…'
+                : tokens.length > 0
+                  ? 'Regenerate QR Codes'
+                  : 'Generate QR Codes'}
             </button>
-          </div>
-        </div>
 
-        {usersError && (
-          <div className="mb-4 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">
-            {usersError}
+            {tokens.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setQrDisplayIndex(0)}
+                  className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Show All QR Codes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPrintGrid(true)}
+                  className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Print All
+                </button>
+              </>
+            )}
           </div>
-        )}
 
-        {usersLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-indigo-600" />
-          </div>
-        ) : users.length === 0 ? (
-          <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-gray-500">
-            No users found.
-          </div>
-        ) : (
-          <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
-            {users.map((user) => {
-              const synthetic = isSyntheticScorekeeper(user);
-              const isAdmin = user.groups.includes('Admins');
-              const teamId = synthetic ? assignedTeamId(user) : '';
-              const team = teamId ? teams.find((t) => t.id === teamId) : null;
-              const isSelf = user.sub === currentSub;
-              const confirming = deleteConfirmUser === user.username;
-              const deleting = deletingUser === user.username;
+          {/* Toggle scorekeeper entry */}
+          {(() => {
+            const gameExists = gameState !== null;
+            const entryEnabled = gameState?.scoringOpen !== false;
+            return (
+              <div className="mb-4">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={entryEnabled}
+                  onClick={() => void handleToggleEntry()}
+                  disabled={togglingEntry || !gameExists}
+                  title={!gameExists ? 'Initialize a game first' : undefined}
+                  className="flex items-center gap-2 disabled:opacity-50"
+                >
+                  {/* Track */}
+                  <span
+                    className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors duration-200 ${
+                      entryEnabled ? 'bg-green-500' : 'bg-gray-300'
+                    }`}
+                  >
+                    {/* Thumb */}
+                    <span
+                      className={`inline-block h-4 w-4 translate-y-0.5 rounded-full bg-white shadow transition-transform duration-200 ${
+                        entryEnabled ? 'translate-x-4' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </span>
+                  <span className="text-xs font-medium text-gray-700">
+                    Scorekeeper Entry {entryEnabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                </button>
+              </div>
+            );
+          })()}
 
-              return (
-                <li key={user.username} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                  {/* Identity — read-only */}
+          {generateError && (
+            <div className="mb-4 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">
+              {generateError}
+            </div>
+          )}
+
+          {/* Per-team token list */}
+          {tokens.length > 0 && (
+            <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+              {tokens.map((token, idx) => (
+                <li key={token.tokenId} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-medium text-gray-900">
-                        {synthetic ? (team?.name ?? 'Unassigned scorekeeper') : user.email}
-                      </p>
-                      {synthetic ? (
-                        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-500">
-                          QR Scorekeeper
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">
-                          {isAdmin ? 'Admin' : 'Scorekeeper'}
-                        </span>
-                      )}
-                    </div>
-                    {!synthetic && <p className="text-xs text-gray-400">{user.status}</p>}
+                    <p className="truncate text-sm font-medium text-gray-900">{token.teamName}</p>
+                    {token.groupType && <p className="text-xs text-gray-400">{token.groupType}</p>}
                   </div>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
+                      token.status === 'UNUSED'
+                        ? 'bg-green-100 text-green-700'
+                        : 'bg-gray-100 text-gray-500'
+                    }`}
+                  >
+                    {token.status === 'UNUSED' ? 'Available' : 'Used'}
+                  </span>
 
-                  {/* Delete — two-step confirm */}
-                  {confirming ? (
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-500">Delete this user?</span>
-                      <button
-                        type="button"
-                        onClick={() => void handleDeleteUser(user)}
-                        disabled={deleting}
-                        className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-                      >
-                        {deleting ? 'Deleting…' : 'Confirm'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeleteConfirmUser(null)}
-                        className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setDeleteConfirmUser(user.username)}
-                      disabled={isSelf}
-                      title={isSelf ? "You can't delete your own account" : undefined}
-                      className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      Delete
-                    </button>
-                  )}
+                  {/* Per-team regenerate — fires immediately, no confirm */}
+                  <button
+                    type="button"
+                    onClick={() => void handleRegenerateTeam(token.teamId)}
+                    disabled={regeneratingTeam === token.teamId}
+                    className="shrink-0 rounded-md border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                  >
+                    {regeneratingTeam === token.teamId ? 'Regenerating…' : 'Regenerate'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setQrDisplayIndex(idx)}
+                    className="shrink-0 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                  >
+                    Show QR
+                  </button>
                 </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
+              ))}
+            </ul>
+          )}
+
+          {tokens.length === 0 && !generating && (
+            <p className="text-sm text-gray-400">
+              No QR codes generated yet. Click &quot;Generate QR Codes&quot; to create them.
+            </p>
+          )}
+        </section>
+
+        {/* ── Create Admin User form ── */}
+        <form
+          onSubmit={handleSubmit}
+          className="flex flex-col gap-4 rounded-lg border border-gray-200 bg-white p-6"
+        >
+          <h2 className="text-base font-semibold text-gray-900">Create Admin User</h2>
+
+          <div>
+            <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-700">
+              Email
+            </label>
+            <input
+              id="email"
+              type="email"
+              required
+              value={adminEmail}
+              onChange={(e) => setAdminEmail(e.target.value)}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={submitting || !adminEmail.trim()}
+            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {submitting ? 'Creating…' : 'Create Admin'}
+          </button>
+
+          {success && (
+            <div className="rounded-md bg-green-50 px-4 py-2 text-sm text-green-700">{success}</div>
+          )}
+          {error && (
+            <div className="rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>
+          )}
+
+          <p className="text-xs text-gray-400">
+            Admin users receive a temporary password by email and must set a new password on first
+            login. Scorekeepers onboard via QR code — use the section above.
+          </p>
+        </form>
+
+        {/* ── Existing users list ── */}
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-base font-semibold text-gray-900">Existing Users</h2>
+            <div className="flex items-center gap-2">
+              {endGameConfirm ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">Delete all scorekeepers?</span>
+                  <button
+                    type="button"
+                    onClick={handleEndGame}
+                    disabled={endingGame}
+                    className="rounded-md bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {endingGame ? 'Deleting…' : 'Confirm'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEndGameConfirm(false)}
+                    className="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setEndGameConfirm(true)}
+                  className="rounded-md bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700"
+                >
+                  Delete All Scorekeeper Users
+                </button>
+              )}
+              {endGameResult && <p className="text-xs text-gray-500">{endGameResult}</p>}
+              <button
+                type="button"
+                disabled={refreshingUsers || usersLoading}
+                onClick={() => {
+                  setRefreshingUsers(true);
+                  void loadUsers().finally(() => setRefreshingUsers(false));
+                }}
+                className="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {refreshingUsers ? 'Refreshing…' : 'Refresh'}
+              </button>
+            </div>
+          </div>
+
+          {usersError && (
+            <div className="mb-4 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">
+              {usersError}
+            </div>
+          )}
+
+          {usersLoading ? (
+            <div className="flex items-center justify-center py-16">
+              <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-indigo-600" />
+            </div>
+          ) : users.length === 0 ? (
+            <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-gray-500">
+              No users found.
+            </div>
+          ) : (
+            <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
+              {users.map((user) => {
+                const synthetic = isSyntheticScorekeeper(user);
+                const isAdmin = user.groups.includes('Admins');
+                const teamId = synthetic ? assignedTeamId(user) : '';
+                const team = teamId ? teams.find((t) => t.id === teamId) : null;
+                const isSelf = user.sub === currentSub;
+                const confirming = deleteConfirmUser === user.username;
+                const deleting = deletingUser === user.username;
+
+                return (
+                  <li key={user.username} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                    {/* Identity — read-only */}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium text-gray-900">
+                          {synthetic ? (team?.name ?? 'Unassigned scorekeeper') : user.email}
+                        </p>
+                        {synthetic ? (
+                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-500">
+                            QR Scorekeeper
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">
+                            {isAdmin ? 'Admin' : 'Scorekeeper'}
+                          </span>
+                        )}
+                      </div>
+                      {!synthetic && <p className="text-xs text-gray-400">{user.status}</p>}
+                    </div>
+
+                    {/* Delete — two-step confirm */}
+                    {confirming ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">Delete this user?</span>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteUser(user)}
+                          disabled={deleting}
+                          className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                        >
+                          {deleting ? 'Deleting…' : 'Confirm'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteConfirmUser(null)}
+                          className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirmUser(user.username)}
+                        disabled={isSelf}
+                        title={isSelf ? "You can't delete your own account" : undefined}
+                        className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      </div>
 
       {/* ── QR display carousel (portal-style overlay) ── */}
       {qrDisplayIndex !== null && tokens.length > 0 && (

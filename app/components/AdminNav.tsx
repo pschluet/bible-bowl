@@ -26,7 +26,7 @@ export default function AdminNav({ adminEmail }: { adminEmail: string }) {
   return (
     <>
       {/* Mobile: compact top bar */}
-      <div className="flex flex-col gap-2 border-b border-gray-200 bg-white px-4 py-3 md:hidden">
+      <div className="flex flex-col gap-2 border-b border-gray-200 bg-white px-4 py-3 print:hidden md:hidden">
         <div className="flex items-center justify-between">
           <span className="text-lg font-bold text-indigo-600">Bible Bowl Admin</span>
           <button
@@ -60,7 +60,7 @@ export default function AdminNav({ adminEmail }: { adminEmail: string }) {
       </div>
 
       {/* Desktop: vertical sidebar */}
-      <div className="hidden h-full w-56 flex-col border-r border-gray-200 bg-white md:flex">
+      <div className="hidden h-full w-56 flex-col border-r border-gray-200 bg-white print:hidden md:flex">
         <div className="px-4 py-5">
           <span className="text-lg font-bold text-indigo-600">Bible Bowl</span>
           <p className="text-xs text-gray-400">Admin</p>
