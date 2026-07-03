@@ -83,69 +83,77 @@ function SortableTeamRow({
   };
 
   return (
-    <li ref={setNodeRef} style={style} className="flex flex-wrap items-center gap-3 px-4 py-3">
-      {/* Drag handle */}
-      <button
-        type="button"
-        {...listeners}
-        {...attributes}
-        className="cursor-grab touch-none text-gray-400 hover:text-gray-600 active:cursor-grabbing"
-        aria-label={`Drag to reorder ${team.name}`}
-      >
-        <GripIcon />
-      </button>
+    <li
+      ref={setNodeRef}
+      style={style}
+      className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3"
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        {/* Drag handle */}
+        <button
+          type="button"
+          {...listeners}
+          {...attributes}
+          className="cursor-grab touch-none text-gray-400 hover:text-gray-600 active:cursor-grabbing"
+          aria-label={`Drag to reorder ${team.name}`}
+        >
+          <GripIcon />
+        </button>
 
-      <div className="min-w-0 flex-1">
-        {editingId === team.id ? (
-          <input
-            type="text"
-            autoFocus
-            value={editName}
-            onChange={(e) => onEditChange(e.target.value)}
-            onBlur={() => onEditSave(team.id)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') onEditSave(team.id);
-              if (e.key === 'Escape') onEditCancel();
-            }}
-            className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none"
-          />
-        ) : (
-          <p className="truncate font-medium text-gray-900">{team.name}</p>
-        )}
+        <div className="min-w-0 flex-1">
+          {editingId === team.id ? (
+            <input
+              type="text"
+              autoFocus
+              value={editName}
+              onChange={(e) => onEditChange(e.target.value)}
+              onBlur={() => onEditSave(team.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') onEditSave(team.id);
+                if (e.key === 'Escape') onEditCancel();
+              }}
+              className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none"
+            />
+          ) : (
+            <p className="break-words font-medium text-gray-900 sm:truncate">{team.name}</p>
+          )}
+        </div>
       </div>
 
-      {/* Group selector */}
-      <select
-        value={team.groupType ?? ''}
-        onChange={(e) => {
-          if (e.target.value) onGroupChange(team.id, e.target.value as GroupType);
-        }}
-        className="rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
-        aria-label={`Group for ${team.name}`}
-      >
-        <option value="">— group —</option>
-        {GROUP_TYPES.map((g) => (
-          <option key={g} value={g}>
-            {GROUP_LABELS[g]}
-          </option>
-        ))}
-      </select>
+      <div className="flex items-center gap-3 pl-7 sm:pl-0">
+        {/* Group selector */}
+        <select
+          value={team.groupType ?? ''}
+          onChange={(e) => {
+            if (e.target.value) onGroupChange(team.id, e.target.value as GroupType);
+          }}
+          className="rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
+          aria-label={`Group for ${team.name}`}
+        >
+          <option value="">— group —</option>
+          {GROUP_TYPES.map((g) => (
+            <option key={g} value={g}>
+              {GROUP_LABELS[g]}
+            </option>
+          ))}
+        </select>
 
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => onEditStart(team)}
-          className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
-        >
-          Edit
-        </button>
-        <button
-          type="button"
-          onClick={() => onDelete(team)}
-          className="text-sm font-medium text-red-600 hover:text-red-800"
-        >
-          Delete
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onEditStart(team)}
+            className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={() => onDelete(team)}
+            className="text-sm font-medium text-red-600 hover:text-red-800"
+          >
+            Delete
+          </button>
+        </div>
       </div>
     </li>
   );

@@ -426,38 +426,50 @@ export default function AdminUsersPage() {
           {tokens.length > 0 && (
             <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
               {tokens.map((token, idx) => (
-                <li key={token.tokenId} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-gray-900">{token.teamName}</p>
-                    {token.groupType && <p className="text-xs text-gray-400">{token.groupType}</p>}
+                <li
+                  key={token.tokenId}
+                  className="flex flex-col gap-2 px-4 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3"
+                >
+                  <div className="flex min-w-0 flex-1 items-center gap-2 sm:contents">
+                    <div className="min-w-0 flex-1">
+                      <p className="break-words text-sm font-medium text-gray-900">
+                        {token.teamName}
+                      </p>
+                      {token.groupType && (
+                        <p className="text-xs text-gray-400">{token.groupType}</p>
+                      )}
+                    </div>
+
+                    <span
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
+                        token.status === 'UNUSED'
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-gray-100 text-gray-500'
+                      }`}
+                    >
+                      {token.status === 'UNUSED' ? 'Available' : 'Used'}
+                    </span>
                   </div>
-                  <span
-                    className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      token.status === 'UNUSED'
-                        ? 'bg-green-100 text-green-700'
-                        : 'bg-gray-100 text-gray-500'
-                    }`}
-                  >
-                    {token.status === 'UNUSED' ? 'Available' : 'Used'}
-                  </span>
 
-                  {/* Per-team regenerate — fires immediately, no confirm */}
-                  <button
-                    type="button"
-                    onClick={() => void handleRegenerateTeam(token.teamId)}
-                    disabled={regeneratingTeam === token.teamId}
-                    className="shrink-0 rounded-md border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
-                  >
-                    {regeneratingTeam === token.teamId ? 'Regenerating…' : 'Regenerate'}
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {/* Per-team regenerate — fires immediately, no confirm */}
+                    <button
+                      type="button"
+                      onClick={() => void handleRegenerateTeam(token.teamId)}
+                      disabled={regeneratingTeam === token.teamId}
+                      className="shrink-0 rounded-md border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                    >
+                      {regeneratingTeam === token.teamId ? 'Regenerating…' : 'Regenerate'}
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setQrDisplayIndex(idx)}
-                    className="shrink-0 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
-                  >
-                    Show QR
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setQrDisplayIndex(idx)}
+                      className="shrink-0 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                    >
+                      Show QR
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -586,11 +598,14 @@ export default function AdminUsersPage() {
                 const deleting = deletingUser === user.username;
 
                 return (
-                  <li key={user.username} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                  <li
+                    key={user.username}
+                    className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3"
+                  >
                     {/* Identity — read-only */}
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-medium text-gray-900">
+                        <p className="break-words font-medium text-gray-900">
                           {synthetic ? (team?.name ?? 'Unassigned scorekeeper') : user.email}
                         </p>
                         {synthetic ? (
@@ -607,36 +622,38 @@ export default function AdminUsersPage() {
                     </div>
 
                     {/* Delete — two-step confirm */}
-                    {confirming ? (
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-500">Delete this user?</span>
+                    <div className="flex items-center gap-2">
+                      {confirming ? (
+                        <>
+                          <span className="text-xs text-gray-500">Delete this user?</span>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteUser(user)}
+                            disabled={deleting}
+                            className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                          >
+                            {deleting ? 'Deleting…' : 'Confirm'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteConfirmUser(null)}
+                            className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
                         <button
                           type="button"
-                          onClick={() => void handleDeleteUser(user)}
-                          disabled={deleting}
-                          className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                          onClick={() => setDeleteConfirmUser(user.username)}
+                          disabled={isSelf}
+                          title={isSelf ? "You can't delete your own account" : undefined}
+                          className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
                         >
-                          {deleting ? 'Deleting…' : 'Confirm'}
+                          Delete
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteConfirmUser(null)}
-                          className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setDeleteConfirmUser(user.username)}
-                        disabled={isSelf}
-                        title={isSelf ? "You can't delete your own account" : undefined}
-                        className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        Delete
-                      </button>
-                    )}
+                      )}
+                    </div>
                   </li>
                 );
               })}
