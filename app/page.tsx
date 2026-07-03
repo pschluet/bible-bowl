@@ -224,6 +224,7 @@ export default function ViewerPage() {
           className="fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-6 bg-black p-6"
           onClick={() => setQrExpanded(false)}
         >
+          <p className="text-7xl font-bold text-white">Scan for Live Scores</p>
           <QRCodeSVG
             value={siteUrl}
             size={500}
