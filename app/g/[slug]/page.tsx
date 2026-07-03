@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useCallback, useEffect, useMemo, useState } from 'react';
+import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { notFound } from 'next/navigation';
@@ -26,6 +26,7 @@ export default function GameLeaderboardPage({ params }: Props) {
   const [favoriteTeamIds, setFavoriteTeamIds] = useState<Set<string>>(new Set());
   const [groups, setGroups] = useState<string[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [qrExpanded, setQrExpanded] = useState(false);
   const [siteUrl, setSiteUrl] = useState('');
   const [teamsSynced, setTeamsSynced] = useState(false);
@@ -77,8 +78,17 @@ export default function GameLeaderboardPage({ params }: Props) {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') setMenuOpen(false);
     }
+    function onClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onClickOutside);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onClickOutside);
+    };
   }, [menuOpen]);
 
   useEffect(() => {
@@ -198,14 +208,6 @@ export default function GameLeaderboardPage({ params }: Props) {
 
   return (
     <main className="flex min-h-full flex-col">
-      {/* Backdrop — must live outside any CSS-transform ancestor so fixed positioning covers the full viewport */}
-      {menuOpen && (
-        <div
-          className="fixed inset-0 z-40"
-          aria-hidden="true"
-          onClick={() => setMenuOpen(false)}
-        />
-      )}
       <header className="relative border-b border-gray-200 bg-white px-4 py-4 text-center">
         <h1 className="text-lg font-bold text-indigo-700 sm:text-3xl">
           {game ? game.title : '🏆 Bible Bowl Live Scores'}
@@ -213,14 +215,14 @@ export default function GameLeaderboardPage({ params }: Props) {
         <p className="mt-1 flex items-center justify-center gap-2 text-sm font-semibold text-gray-500 sm:text-lg">
           {currentQuestion !== null && (
             <span className="relative flex h-3 w-3 shrink-0">
-              <span className="absolute inline-flex h-full w-full animate-[ping-slow_2.5s_cubic-bezier(0,0,0.2,1)_infinite] rounded-full bg-amber-500 opacity-75" />
+              <span className="absolute inline-flex h-full w-full animate-ping-slow rounded-full bg-amber-500 opacity-75" />
               <span className="relative inline-flex h-3 w-3 rounded-full bg-amber-500" />
             </span>
           )}
           {currentQuestion === null ? 'Waiting to start' : `Question ${currentQuestion}`}
         </p>
         {/* Navigation menu — top-right of header */}
-        <div className="absolute right-3 top-1/2 z-50 -translate-y-1/2">
+        <div ref={menuRef} className="absolute right-3 top-1/2 z-50 -translate-y-1/2">
           <button
             type="button"
             onClick={() => setMenuOpen((open) => !open)}
