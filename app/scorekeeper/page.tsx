@@ -39,11 +39,6 @@ export default function ScorekeeperPage() {
     if (!myTeam || currentQuestion === null) return null;
     return teamScores.find((s) => s.questionNumber === currentQuestion)?.points ?? null;
   }, [myTeam, currentQuestion, teamScores]);
-  const existingScoreId = useMemo(() => {
-    if (!myTeam || currentQuestion === null) return null;
-    return teamScores.find((s) => s.questionNumber === currentQuestion)?.id ?? null;
-  }, [myTeam, currentQuestion, teamScores]);
-
   // Primitive dep for the Score subscription so it only restarts when the team id changes
   const myTeamId = myTeam?.id ?? null;
 
@@ -124,7 +119,6 @@ export default function ScorekeeperPage() {
       team={myTeam}
       currentQuestion={currentQuestion}
       existingScore={existingScore}
-      scoreId={existingScoreId}
     />
   );
 }

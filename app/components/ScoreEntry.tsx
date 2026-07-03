@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Schema } from '@/amplify/data/resource';
 import GroupPill from '@/app/components/GroupPill';
 
@@ -10,7 +10,6 @@ type ScoreEntryProps = {
   team: Team;
   currentQuestion: number | null;
   existingScore: number | null;
-  scoreId: string | null;
 };
 
 const OPTIONS = [0, 1, 2, 3];
@@ -19,11 +18,16 @@ export default function ScoreEntry({
   team,
   currentQuestion,
   existingScore,
-  scoreId,
 }: ScoreEntryProps) {
   const [submitting, setSubmitting] = useState(false);
   const [submittedScore, setSubmittedScore] = useState<number | null>(existingScore);
   const [error, setError] = useState<string | null>(null);
+
+  // Re-sync local optimistic state with the live prop so that an admin delete
+  // (existingScore → null) returns the scorekeeper to the entry screen.
+  useEffect(() => {
+    setSubmittedScore(existingScore);
+  }, [existingScore]);
 
   async function handleSelect(points: number) {
     if (currentQuestion === null || submittedScore !== null || submitting) {
@@ -58,8 +62,6 @@ export default function ScoreEntry({
     }
   }
 
-  const locked = scoreId !== null && existingScore !== null;
-
   return (
     <div className="space-y-6">
       <div className="flex flex-col items-center gap-1 text-center">
@@ -77,12 +79,7 @@ export default function ScoreEntry({
             Question {currentQuestion}
           </p>
 
-          {locked ? (
-            <p className="rounded-xl border border-gray-200 bg-white p-6 text-center text-gray-700">
-              You scored <span className="font-bold text-indigo-700">{existingScore}</span> for this
-              question
-            </p>
-          ) : submittedScore !== null ? (
+          {submittedScore !== null ? (
             <div className="rounded-xl border border-green-200 bg-green-50 p-6 text-center">
               <p className="text-lg font-semibold text-green-700">Score submitted ✓</p>
               <p className="mt-1 text-gray-700">
