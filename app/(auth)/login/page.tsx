@@ -34,8 +34,8 @@ function RedirectOnAuth() {
       const groups =
         (session.tokens?.accessToken?.payload['cognito:groups'] as string[] | undefined) ?? [];
       if (cancelled) return;
-      if (groups.includes('Admins')) {
-        router.push('/admin/scores');
+      if (groups.includes('Admins') || groups.includes('SuperAdmins')) {
+        router.push('/admin/games');
       } else {
         router.push('/scorekeeper');
       }

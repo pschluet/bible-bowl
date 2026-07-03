@@ -1,17 +1,17 @@
 /**
- * POST /api/scorekeeper/generate — admin only
+ * POST /api/scorekeeper/generate — admin only (owner or super admin)
  *
- * Generates one fresh QR-onboarding token per team, or for a single team when
- * `{ teamId }` is supplied in the request body.
+ * Generates one fresh QR-onboarding token per team for a given game, or for a
+ * single team when `{ teamId }` is supplied in the request body.
  *
  * Any existing UNUSED tokens for the affected team(s) are marked CONSUMED so
  * old QR codes can't be scanned after a regeneration (security: prevents a
  * stale code from being used by an unauthorised person who saw the earlier
  * printout).
  *
- * Body (optional): { teamId?: string }
- *   - omitted / no body → bulk: regenerate for ALL teams
- *   - teamId present    → single-team: regenerate only that team's token
+ * Body (required): { gameId: string; teamId?: string }
+ *   - gameId only → bulk: regenerate for ALL teams in that game
+ *   - gameId + teamId → single-team regenerate
  *
  * Returns: { tokens: [{ teamId, teamName, groupType, tokenId, status }] }
  * The client constructs the deep link: /scan?token=<tokenId>
@@ -32,15 +32,31 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Parse optional body — tolerate an empty body or missing Content-Type
-  const body = (await request.json().catch(() => ({}))) as { teamId?: string };
+  const body = (await request.json().catch(() => ({}))) as {
+    gameId?: string;
+    teamId?: string;
+  };
+  const gameId = typeof body.gameId === 'string' ? body.gameId.trim() : null;
   const singleTeamId = typeof body.teamId === 'string' ? body.teamId.trim() : null;
+
+  if (!gameId) {
+    return NextResponse.json({ error: 'gameId is required' }, { status: 400 });
+  }
 
   const dataClient = generateServerClientUsingCookies<Schema>({
     config: outputs,
     cookies,
     authMode: 'apiKey',
   });
+
+  // Verify the game exists and the caller is the owner (or super admin)
+  const { data: game } = await dataClient.models.Game.get({ slug: gameId });
+  if (!game) {
+    return NextResponse.json({ error: 'Game not found.' }, { status: 404 });
+  }
+  if (!session.isSuperAdmin && game.ownerId !== session.sub) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
 
   // Tokens expire 8 hours from now — comfortably covers a ~3-hour event
   const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString();
@@ -53,11 +69,22 @@ export async function POST(request: Request) {
     }
     const team = teamRes.data;
 
-    // Expire only that team's outstanding UNUSED tokens
+    // Verify the team belongs to this game
+    if (team.gameId !== gameId) {
+      return NextResponse.json({ error: 'Team does not belong to this game.' }, { status: 400 });
+    }
+
+    // Expire only that team's outstanding UNUSED tokens (within this game)
     const oldTokens = await listAll((opts) =>
       dataClient.models.OnboardingToken.list({
         ...opts,
-        filter: { and: [{ teamId: { eq: singleTeamId } }, { status: { eq: 'UNUSED' } }] },
+        filter: {
+          and: [
+            { teamId: { eq: singleTeamId } },
+            { gameId: { eq: gameId } },
+            { status: { eq: 'UNUSED' } },
+          ],
+        },
       })
     );
 
@@ -79,7 +106,9 @@ export async function POST(request: Request) {
     const batchId = randomUUID();
     await dataClient.models.OnboardingToken.create({
       tokenId,
+      gameId,
       teamId: team.id,
+      ownerId: game.ownerId,
       status: 'UNUSED',
       expiresAt,
       batchId,
@@ -98,15 +127,17 @@ export async function POST(request: Request) {
     });
   }
 
-  // ── Bulk regeneration (all teams) ────────────────────────────────────────
-  const teams = await listAll((opts) => dataClient.models.Team.list(opts));
+  // ── Bulk regeneration (all teams in this game) ────────────────────────────
+  const teams = await listAll((opts) =>
+    dataClient.models.Team.list({ ...opts, filter: { gameId: { eq: gameId } } })
+  );
   teams.sort(compareTeamOrder);
 
-  // Expire any outstanding UNUSED tokens (so old QR codes can't be reused)
+  // Expire any outstanding UNUSED tokens for this game (so old QR codes can't be reused)
   const oldTokens = await listAll((opts) =>
     dataClient.models.OnboardingToken.list({
       ...opts,
-      filter: { status: { eq: 'UNUSED' } },
+      filter: { and: [{ gameId: { eq: gameId } }, { status: { eq: 'UNUSED' } }] },
     })
   );
 
@@ -131,7 +162,9 @@ export async function POST(request: Request) {
       const tokenId = randomUUID();
       await dataClient.models.OnboardingToken.create({
         tokenId,
+        gameId,
         teamId: team.id,
+        ownerId: game.ownerId,
         status: 'UNUSED',
         expiresAt,
         batchId,

@@ -6,7 +6,8 @@ export interface ServerSession {
   sub: string;
   email: string;
   groups: string[];
-  isAdmin: boolean;
+  isSuperAdmin: boolean;
+  isAdmin: boolean; // true for both Admins and SuperAdmins
   isScorekeeper: boolean;
 }
 
@@ -35,6 +36,11 @@ function jsCookieEncodeName(name: string): string {
  * Validates the Cognito session from cookies using local JWT verification.
  * Makes zero Cognito API calls — safe under any level of concurrent load.
  * Returns null if not authenticated or if the token is invalid/expired.
+ *
+ * Roles:
+ *  - isSuperAdmin: in the SuperAdmins Cognito group
+ *  - isAdmin: in Admins OR SuperAdmins (super admins have all admin abilities)
+ *  - isScorekeeper: in the Scorekeepers group
  */
 export async function getServerSession(): Promise<ServerSession | null> {
   try {
@@ -61,11 +67,15 @@ export async function getServerSession(): Promise<ServerSession | null> {
     const groups = (accessPayload['cognito:groups'] as string[]) ?? [];
     const email = (idPayload?.email as string) ?? '';
 
+    const isSuperAdmin = groups.includes('SuperAdmins');
+
     return {
       sub,
       email,
       groups,
-      isAdmin: groups.includes('Admins'),
+      isSuperAdmin,
+      // Super admins inherit all admin abilities
+      isAdmin: isSuperAdmin || groups.includes('Admins'),
       isScorekeeper: groups.includes('Scorekeepers'),
     };
   } catch {

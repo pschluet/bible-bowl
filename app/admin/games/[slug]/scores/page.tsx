@@ -1,15 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
+import { fetchAuthSession } from 'aws-amplify/auth';
 import type { Schema } from '@/amplify/data/resource';
-import {
-  GAME_STATE_ID,
-  GROUP_LABELS,
-  GroupType,
-  compareTeamOrder,
-  scoreId,
-} from '@/app/lib/constants';
+import { GROUP_LABELS, GroupType, compareTeamOrder, scoreId } from '@/app/lib/constants';
 import { subscribeLive } from '@/app/lib/liveQuery';
 import { downloadCsv, escapeCsvField, localTimestamp } from '@/app/lib/csv';
 import ScoreGrid from '@/app/components/ScoreGrid';
@@ -18,13 +13,13 @@ import KeyboardLegend from '@/app/components/KeyboardLegend';
 
 type Team = Schema['Team']['type'];
 type Score = Schema['Score']['type'];
+type Game = Schema['Game']['type'];
 
 const client = generateClient<Schema>({ authMode: 'userPool' });
 
 /**
- * Fire-and-forget: after a full load we delete any duplicate Score records (same
- * teamId+questionNumber), keeping the one with the latest updatedAt. The scoreMap
- * memo already hides duplicates in the UI; this cleans them from the DB over time.
+ * Fire-and-forget: after a full load we delete any duplicate Score records
+ * (same teamId+questionNumber), keeping the one with the latest updatedAt.
  */
 function healDuplicates(all: Score[]) {
   const byKey = new Map<string, Score[]>();
@@ -39,7 +34,6 @@ function healDuplicates(all: Score[]) {
   }
   for (const recs of byKey.values()) {
     if (recs.length < 2) continue;
-    // keep the latest, delete the rest
     const sorted = [...recs].sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
     sorted.slice(1).forEach((s) => {
       void client.models.Score.delete({ id: s.id }, { authMode: 'userPool' });
@@ -47,17 +41,18 @@ function healDuplicates(all: Score[]) {
   }
 }
 
-export default function AdminScoresPage() {
+interface Props {
+  params: Promise<{ slug: string }>;
+}
+
+export default function AdminScoresPage({ params }: Props) {
+  const { slug } = use(params);
+
+  const [userSub, setUserSub] = useState<string | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
-  // Separate sources for score state to avoid flicker when a concurrent
-  // subscription event arrives before the server echo of an optimistic write.
-  // streamedScores: authoritative collection from observeQuery
-  // optimisticScores: pending local writes not yet confirmed by the stream
   const [streamedScores, setStreamedScores] = useState<Score[]>([]);
   const [optimisticScores, setOptimisticScores] = useState<Score[]>([]);
-  const [currentQuestion, setCurrentQuestion] = useState<number | null>(null);
-  // Gate loading on both streams completing their initial sync so the grid
-  // paints fully populated (no dashes-then-fill as score pages arrive).
+  const [game, setGame] = useState<Game | null>(null);
   const [teamsSynced, setTeamsSynced] = useState(false);
   const [scoresSynced, setScoresSynced] = useState(false);
   const loading = !teamsSynced || !scoresSynced;
@@ -67,14 +62,18 @@ export default function AdminScoresPage() {
   const [quickEntryOpen, setQuickEntryOpen] = useState(false);
   const [recentEntry, setRecentEntry] = useState<{ teamId: string; points: number } | null>(null);
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Keeps a stable ref to scoreMap so optimistic saveScore can read it without deps
   const scoreMapRef = useRef<Map<string, Map<number, Score>>>(new Map());
-  // Tracks whether healDuplicates has run for this session
   const healedRef = useRef(false);
 
-  // Merged scores: stream + optimistic overlay (optimistic wins for same id if newer).
-  // This preserves optimistic writes during the ~100–300 ms before the server echo
-  // arrives, even if another subscription event fires in that window.
+  const currentQuestion = game?.currentQuestion ?? null;
+
+  // Get user sub for stamping ownerId on new scores
+  useEffect(() => {
+    void fetchAuthSession().then((session) => {
+      setUserSub((session.tokens?.accessToken?.payload.sub as string | undefined) ?? null);
+    });
+  }, []);
+
   const scores = useMemo((): Score[] => {
     if (optimisticScores.length === 0) return streamedScores;
     const map = new Map(streamedScores.map((s) => [s.id, s]));
@@ -87,8 +86,6 @@ export default function AdminScoresPage() {
     return [...map.values()];
   }, [streamedScores, optimisticScores]);
 
-  // When the stream delivers a confirmed version of an optimistic entry, prune it
-  // so the stream's authoritative value fully takes over.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setOptimisticScores((prev) => {
@@ -96,14 +93,12 @@ export default function AdminScoresPage() {
       const streamMap = new Map(streamedScores.map((s) => [s.id, s]));
       const next = prev.filter((opt) => {
         const s = streamMap.get(opt.id);
-        // Keep optimistic entry if stream doesn't have it yet or ours is still newer
         return !s || (opt.updatedAt ?? '') > (s.updatedAt ?? '');
       });
-      return next.length === prev.length ? prev : next; // skip re-render if nothing changed
+      return next.length === prev.length ? prev : next;
     });
   }, [streamedScores]);
 
-  // Clear the advance timer on unmount to avoid setState on an unmounted component
   useEffect(
     () => () => {
       if (advanceTimerRef.current !== null) clearTimeout(advanceTimerRef.current);
@@ -111,13 +106,8 @@ export default function AdminScoresPage() {
     []
   );
 
-  // Sorted teams — single source of truth for order (used by both grid and drawer)
   const sortedTeams = useMemo(() => [...teams].sort(compareTeamOrder), [teams]);
 
-  // Score lookup: teamId → (questionNumber → Score)
-  // When duplicate records exist for the same (teamId, questionNumber), keep the
-  // one with the latest updatedAt so the displayed value is deterministic.
-  // Also keep a ref in sync so saveScore can read it without stale-closure issues.
   const scoreMap = useMemo(() => {
     const map = new Map<string, Map<number, Score>>();
     for (const score of scores) {
@@ -137,7 +127,6 @@ export default function AdminScoresPage() {
     scoreMapRef.current = scoreMap;
   }, [scoreMap]);
 
-  // Default selection to first team once the game is active
   useEffect(() => {
     if (currentQuestion !== null && sortedTeams.length > 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -148,47 +137,57 @@ export default function AdminScoresPage() {
     }
   }, [currentQuestion, sortedTeams]);
 
-  // Team stream
+  // Team stream — filtered to this game
   useEffect(() => {
     return subscribeLive(
-      () => client.models.Team.observeQuery({ authMode: 'userPool' }),
+      () =>
+        client.models.Team.observeQuery({
+          authMode: 'userPool',
+          filter: { gameId: { eq: slug } },
+        }),
       ({ items, isSynced }) => {
         setTeams(items);
         if (isSynced) setTeamsSynced(true);
       }
     );
-  }, []);
+  }, [slug]);
 
-  // Score stream — run healDuplicates once after the first full sync
+  // Score stream — filtered to this game
   useEffect(() => {
     return subscribeLive(
-      () => client.models.Score.observeQuery({ authMode: 'userPool' }),
+      () =>
+        client.models.Score.observeQuery({
+          authMode: 'userPool',
+          filter: { gameId: { eq: slug } },
+        }),
       ({ items, isSynced }) => {
         setStreamedScores(items);
         if (isSynced) {
           setScoresSynced(true);
           if (!healedRef.current) {
             healedRef.current = true;
-            healDuplicates(items); // fire-and-forget background DB cleanup
+            healDuplicates(items);
           }
         }
       }
     );
-  }, []);
+  }, [slug]);
 
-  // GameState stream
+  // Game stream — for currentQuestion and scoringOpen
   useEffect(() => {
     return subscribeLive(
-      () => client.models.GameState.observeQuery({ authMode: 'userPool' }),
+      () =>
+        client.models.Game.observeQuery({
+          authMode: 'userPool',
+          filter: { slug: { eq: slug } },
+        }),
       ({ items }) => {
-        setCurrentQuestion(items[0]?.currentQuestion ?? null);
+        setGame(items[0] ?? null);
       }
     );
-  }, []);
+  }, [slug]);
 
-  // Selection helpers
   const selectTeam = useCallback((id: string) => setSelectedTeamId(id), []);
-
   const selectNext = useCallback(() => {
     setSelectedTeamId((prev) => {
       const idx = sortedTeams.findIndex((t) => t.id === prev);
@@ -196,7 +195,6 @@ export default function AdminScoresPage() {
       return prev;
     });
   }, [sortedTeams]);
-
   const selectPrev = useCallback(() => {
     setSelectedTeamId((prev) => {
       const idx = sortedTeams.findIndex((t) => t.id === prev);
@@ -209,11 +207,10 @@ export default function AdminScoresPage() {
     setBusy(true);
     setError(null);
     try {
-      await client.models.GameState.create(
-        { id: GAME_STATE_ID, currentQuestion: 1, scoringOpen: true },
+      await client.models.Game.update(
+        { slug, currentQuestion: 1, scoringOpen: true },
         { authMode: 'userPool' }
       );
-      // Stream delivers the new GameState — no reload needed
     } catch {
       setError('Failed to initialize game.');
     } finally {
@@ -226,11 +223,10 @@ export default function AdminScoresPage() {
     setBusy(true);
     setError(null);
     try {
-      await client.models.GameState.update(
-        { id: GAME_STATE_ID, currentQuestion: currentQuestion + 1 },
+      await client.models.Game.update(
+        { slug, currentQuestion: currentQuestion + 1 },
         { authMode: 'userPool' }
       );
-      // Stream delivers the update — no reload needed
     } catch {
       setError('Failed to advance question.');
     } finally {
@@ -241,30 +237,33 @@ export default function AdminScoresPage() {
   async function handleReset() {
     if (
       !confirm(
-        'Reset all scores and questions?\n\nEvery score will be permanently deleted and the game will return to "not started". Teams are kept.\n\nThis cannot be undone.'
+        'Reset all scores and questions for this game?\n\nEvery score will be permanently deleted and the game will return to "not started". Teams are kept.\n\nThis cannot be undone.'
       )
     )
       return;
     setBusy(true);
     setError(null);
     try {
-      // Amplify has no bulk delete — list all pages then delete each Score.
+      // Delete all scores for this game
       let nextToken: string | null | undefined;
       do {
-        const page = await client.models.Score.list(nextToken ? { nextToken } : undefined);
+        const page = await client.models.Score.list({
+          filter: { gameId: { eq: slug } },
+          ...(nextToken ? { nextToken } : {}),
+        });
         await Promise.all(
           page.data.map((s) => client.models.Score.delete({ id: s.id }, { authMode: 'userPool' }))
         );
         nextToken = page.nextToken;
       } while (nextToken);
 
-      // Delete the GameState singleton → returns to "not started".
-      if (currentQuestion !== null) {
-        await client.models.GameState.delete({ id: GAME_STATE_ID }, { authMode: 'userPool' });
-      }
-      // Clear any pending optimistic overrides so the grid resets immediately
+      // Reset currentQuestion (keep the game, just reset progress)
+      await client.models.Game.update(
+        { slug, currentQuestion: 1, scoringOpen: true },
+        { authMode: 'userPool' }
+      );
+
       setOptimisticScores([]);
-      // Streams deliver the individual deletes — no full reload needed
     } catch {
       setError('Failed to reset the game.');
     } finally {
@@ -272,9 +271,6 @@ export default function AdminScoresPage() {
     }
   }
 
-  // Optimistic upsert: update local state immediately, then fire exactly one network
-  // write. No round-trip read, no full reload — makes ~2 entries/sec feel instant.
-  // The scoreMap is authoritative (fully paginated) so we know the existing record.
   const saveScore = useCallback(
     async (teamId: string, questionNumber: number, points: number) => {
       setError(null);
@@ -282,14 +278,13 @@ export default function AdminScoresPage() {
       const id = existing?.id ?? scoreId(teamId, questionNumber);
       const now = new Date().toISOString();
 
-      // Apply optimistically: add to the overlay so the grid updates instantly.
-      // The cleanup effect removes it once the stream delivers the confirmed echo.
       setOptimisticScores((prev) => {
         const next = prev.filter((s) => s.id !== id);
-        // Spread existing to preserve any Amplify-generated fields we don't touch
         next.push({
           ...(existing ?? {}),
           id,
+          gameId: slug,
+          ownerId: game?.ownerId ?? userSub ?? '',
           teamId,
           questionNumber,
           points,
@@ -303,30 +298,32 @@ export default function AdminScoresPage() {
           await client.models.Score.update({ id, points }, { authMode: 'userPool' });
         } else {
           const { errors } = await client.models.Score.create(
-            { id, teamId, questionNumber, points },
+            {
+              id,
+              gameId: slug,
+              ownerId: game?.ownerId ?? userSub ?? '',
+              teamId,
+              questionNumber,
+              points,
+            },
             { authMode: 'userPool' }
           );
           if (errors?.length) {
-            // Deterministic id already exists (concurrent race) — update instead
             await client.models.Score.update({ id, points }, { authMode: 'userPool' });
           }
         }
       } catch {
         setError('Failed to save score.');
-        // Roll back: remove optimistic override; stream retains the old value
         setOptimisticScores((prev) => prev.filter((s) => s.id !== id));
       }
     },
-    [] // no deps needed — reads scoreMapRef (stable ref) and writes via stable setters
+    [slug, game, userSub]
   );
 
-  // Shared entry helper used by keyboard shortcuts (grid) and quick-entry drawer:
-  // saves the score, shows a brief confirmation flash, then advances to the next team.
   const enterScoreAndAdvance = useCallback(
     (teamId: string, points: number) => {
       if (currentQuestion === null) return;
       void saveScore(teamId, currentQuestion, points);
-      // Flash confirmation for ~450 ms before advancing
       setRecentEntry({ teamId, points });
       if (advanceTimerRef.current !== null) clearTimeout(advanceTimerRef.current);
       advanceTimerRef.current = setTimeout(() => {
@@ -342,7 +339,6 @@ export default function AdminScoresPage() {
     setError(null);
     try {
       await client.models.Score.delete({ id: existingId }, { authMode: 'userPool' });
-      // Stream delivers the delete — no reload needed
     } catch {
       setError('Failed to clear score.');
     }
@@ -350,9 +346,7 @@ export default function AdminScoresPage() {
 
   const handleExport = useCallback(() => {
     const questionNumbers = Array.from({ length: currentQuestion ?? 0 }, (_, i) => i + 1);
-
     const header = ['Team', 'Type', ...questionNumbers.map((q) => `Q${q}`), 'Total'];
-
     const rows = sortedTeams.map((team) => {
       const byQuestion = scoreMap.get(team.id);
       const typeLabel =
@@ -361,20 +355,18 @@ export default function AdminScoresPage() {
           : '';
       let total = 0;
       const questionCells = questionNumbers.map((q) => {
-        const score = byQuestion?.get(q);
-        if (score !== undefined) {
-          total += score.points;
-          return String(score.points);
+        const s = byQuestion?.get(q);
+        if (s !== undefined) {
+          total += s.points;
+          return String(s.points);
         }
         return '';
       });
       return [team.name, typeLabel, ...questionCells, String(total)];
     });
-
     const csvLines = [header, ...rows]
       .map((fields) => fields.map(escapeCsvField).join(','))
       .join('\n');
-
     const filename = `bible-bowl-scores-${localTimestamp(new Date())}.csv`;
     downloadCsv(filename, csvLines);
   }, [currentQuestion, sortedTeams, scoreMap]);

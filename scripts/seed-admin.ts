@@ -29,9 +29,14 @@ function generateTempPassword(): string {
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const outputs = require('../amplify_outputs.json');
 
-const email = process.argv[2];
+// Usage: npm run seed:admin -- user@example.com [--super]
+const args = process.argv.slice(2);
+const email = args.find((a) => !a.startsWith('--'));
+const isSuperAdmin = args.includes('--super');
+
 if (!email) {
-  console.error('Usage: npm run seed:admin -- user@example.com');
+  console.error('Usage: npm run seed:admin -- user@example.com [--super]');
+  console.error('  --super  Add to SuperAdmins group instead of Admins');
   process.exit(1);
 }
 
@@ -41,9 +46,10 @@ const client = new CognitoIdentityProviderClient({
 });
 
 const userPoolId = outputs.auth.user_pool_id;
+const groupName = isSuperAdmin ? 'SuperAdmins' : 'Admins';
 
 async function main() {
-  console.log(`Promoting ${email} to Admins group in pool ${userPoolId}...`);
+  console.log(`Promoting ${email} to ${groupName} group in pool ${userPoolId}...`);
 
   let tempPassword: string | undefined;
 
@@ -77,11 +83,14 @@ async function main() {
     new AdminAddUserToGroupCommand({
       UserPoolId: userPoolId,
       Username: email,
-      GroupName: 'Admins',
+      GroupName: groupName,
     })
   );
 
-  console.log(`✓ ${email} is now in the Admins group.`);
+  console.log(`✓ ${email} is now in the ${groupName} group.`);
+  if (isSuperAdmin) {
+    console.log('Super admins can manage all games and create/delete admin users.');
+  }
   if (tempPassword) {
     console.log(`\nTemporary password: ${tempPassword}`);
     console.log('Sign in at /login with this password — you will be prompted to set a new one.');

@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { use, useEffect, useMemo, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
+import { fetchAuthSession } from 'aws-amplify/auth';
 import {
   DndContext,
   DragEndEvent,
@@ -27,7 +28,6 @@ type Team = Schema['Team']['type'];
 
 const client = generateClient<Schema>({ authMode: 'userPool' });
 
-// ── Drag handle icon ────────────────────────────────────────────────────────
 function GripIcon() {
   return (
     <svg
@@ -48,7 +48,6 @@ function GripIcon() {
   );
 }
 
-// ── Sortable row ────────────────────────────────────────────────────────────
 interface RowProps {
   team: Team;
   editingId: string | null;
@@ -89,7 +88,6 @@ function SortableTeamRow({
       className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3"
     >
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        {/* Drag handle */}
         <button
           type="button"
           {...listeners}
@@ -121,7 +119,6 @@ function SortableTeamRow({
       </div>
 
       <div className="flex items-center gap-3 pl-7 sm:pl-0">
-        {/* Group selector */}
         <select
           value={team.groupType ?? ''}
           onChange={(e) => {
@@ -159,8 +156,15 @@ function SortableTeamRow({
   );
 }
 
-// ── Page ────────────────────────────────────────────────────────────────────
-export default function AdminTeamsPage() {
+interface Props {
+  params: Promise<{ slug: string }>;
+}
+
+export default function AdminTeamsPage({ params }: Props) {
+  const { slug } = use(params);
+
+  const [userSub, setUserSub] = useState<string | null>(null);
+  const [gameOwnerId, setGameOwnerId] = useState<string | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -180,14 +184,35 @@ export default function AdminTeamsPage() {
   );
 
   useEffect(() => {
+    void fetchAuthSession().then((session) => {
+      setUserSub((session.tokens?.accessToken?.payload.sub as string | undefined) ?? null);
+    });
+  }, []);
+
+  useEffect(() => {
     return subscribeLive(
-      () => client.models.Team.observeQuery({ authMode: 'userPool' }),
+      () =>
+        client.models.Team.observeQuery({
+          authMode: 'userPool',
+          filter: { gameId: { eq: slug } },
+        }),
       ({ items, isSynced }) => {
         setTeams(items);
+        if (items.length > 0) setGameOwnerId(items[0].ownerId);
         if (isSynced) setLoading(false);
       }
     );
-  }, []);
+  }, [slug]);
+
+  // Resolve the ownerId from the game if no teams yet
+  useEffect(() => {
+    if (gameOwnerId) return;
+    void client.models.Game.get({ slug }, { authMode: 'userPool' }).then(({ data }) => {
+      if (data) setGameOwnerId(data.ownerId);
+    });
+  }, [slug, gameOwnerId]);
+
+  const ownerId = gameOwnerId ?? userSub ?? '';
 
   async function handleAdd() {
     const name = newName.trim();
@@ -197,7 +222,7 @@ export default function AdminTeamsPage() {
     try {
       const displayOrder = teams.reduce((m, t) => Math.max(m, t.displayOrder ?? -1), -1) + 1;
       await client.models.Team.create(
-        { name, groupType: newGroup, displayOrder },
+        { name, gameId: slug, ownerId, groupType: newGroup, displayOrder },
         { authMode: 'userPool' }
       );
       setNewName('');
@@ -247,11 +272,8 @@ export default function AdminTeamsPage() {
     if (oldIndex === -1 || newIndex === -1) return;
 
     const reordered = arrayMove(sortedTeams, oldIndex, newIndex);
-
-    // Snapshot for revert
     const previous = teams;
 
-    // Optimistic: assign each team its new displayOrder (= array index)
     setTeams((cur) => {
       const orderMap = new Map(reordered.map((t, i) => [t.id, i]));
       return cur.map((t) => (orderMap.has(t.id) ? { ...t, displayOrder: orderMap.get(t.id)! } : t));
@@ -259,7 +281,6 @@ export default function AdminTeamsPage() {
 
     setError(null);
     try {
-      // Only write teams whose displayOrder actually changed
       const updates = reordered.flatMap((t, i) =>
         t.displayOrder !== i
           ? [client.models.Team.update({ id: t.id, displayOrder: i }, { authMode: 'userPool' })]
@@ -280,7 +301,6 @@ export default function AdminTeamsPage() {
         <div className="mb-4 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>
       )}
 
-      {/* Add team row */}
       <div className="mb-6 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-white p-4">
         <input
           type="text"

@@ -21,10 +21,11 @@ function attr(user: UserType, name: string): string {
 
 // ---------------------------------------------------------------------------
 // GET /api/admin/users — list all Cognito users with their groups
+// Super admins only (regular admins manage teams/scorekeepers, not users).
 // ---------------------------------------------------------------------------
 export async function GET() {
   const session = await getServerSession();
-  if (!session?.isAdmin) {
+  if (!session?.isSuperAdmin) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -82,11 +83,12 @@ export async function GET() {
 
 // ---------------------------------------------------------------------------
 // POST /api/admin/users — create a new Admin user
+// Super admins only — regular admins cannot create other admins.
 // Scorekeepers are onboarded via QR scan (/api/scorekeeper/exchange).
 // ---------------------------------------------------------------------------
 export async function POST(request: Request) {
   const session = await getServerSession();
-  if (!session?.isAdmin) {
+  if (!session?.isSuperAdmin) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -144,6 +146,7 @@ export async function POST(request: Request) {
 
 // ---------------------------------------------------------------------------
 // DELETE /api/admin/users — delete a single user (admin or scorekeeper)
+// Super admins only.
 //
 // Body: { username: string; sub?: string }
 // - Self-deletion is blocked server-side by comparing sub against session.sub.
@@ -152,7 +155,7 @@ export async function POST(request: Request) {
 // ---------------------------------------------------------------------------
 export async function DELETE(request: Request) {
   const session = await getServerSession();
-  if (!session?.isAdmin) {
+  if (!session?.isSuperAdmin) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -169,7 +172,7 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: 'username is required' }, { status: 400 });
   }
 
-  // Prevent an admin from deleting their own account
+  // Prevent a super admin from deleting their own account
   if (sub && sub === session.sub) {
     return NextResponse.json({ error: 'You cannot delete your own account.' }, { status: 400 });
   }
@@ -205,8 +208,7 @@ export async function DELETE(request: Request) {
     }
   }
 
-  // Best-effort: revoke active sessions before deletion so existing JWTs stop
-  // working. Must run before delete (user must still exist to be signed out).
+  // Best-effort: revoke active sessions before deletion so existing JWTs stop working.
   try {
     await cognitoClient.send(
       new AdminUserGlobalSignOutCommand({
@@ -215,7 +217,6 @@ export async function DELETE(request: Request) {
       })
     );
   } catch (err) {
-    // Non-fatal: proceed with deletion even if sign-out fails
     console.error('AdminUserGlobalSignOut failed (non-fatal):', err);
   }
 

@@ -10,75 +10,80 @@ import GameEndedView from '@/app/components/GameEndedView';
 
 type Team = Schema['Team']['type'];
 type Score = Schema['Score']['type'];
-type GameState = Schema['GameState']['type'];
+type Game = Schema['Game']['type'];
 
 const client = generateClient<Schema>({ authMode: 'userPool' });
 
 export default function ScorekeeperPage() {
-  // Raw stream state
   const [userSub, setUserSub] = useState<string | null>(null);
   const [allTeams, setAllTeams] = useState<Team[]>([]);
-  const [gameStateItems, setGameStateItems] = useState<GameState[]>([]);
+  const [gameItems, setGameItems] = useState<Game[]>([]);
   const [teamScores, setTeamScores] = useState<Score[]>([]);
 
-  // Track when each stream has completed its initial sync
   const [teamsSynced, setTeamsSynced] = useState(false);
-  const [gameStateSynced, setGameStateSynced] = useState(false);
+  const [gameSynced, setGameSynced] = useState(false);
   const [scoresSynced, setScoresSynced] = useState(false);
 
-  // Derived state
+  // The scorekeeper's team — found by matching scorekeeperUserId to userSub
   const myTeam = useMemo(
     () => allTeams.find((t) => t.scorekeeperUserId === userSub) ?? null,
     [allTeams, userSub]
   );
-  const currentQuestion = useMemo(
-    () => gameStateItems[0]?.currentQuestion ?? null,
-    [gameStateItems]
-  );
+  const myTeamId = myTeam?.id ?? null;
+
+  // The game for this team — subscribed by gameId once we have a team
+  const game = useMemo(() => gameItems[0] ?? null, [gameItems]);
+  const currentQuestion = game?.currentQuestion ?? null;
+
   const existingScore = useMemo(() => {
     if (!myTeam || currentQuestion === null) return null;
     return teamScores.find((s) => s.questionNumber === currentQuestion)?.points ?? null;
   }, [myTeam, currentQuestion, teamScores]);
-  // Primitive dep for the Score subscription so it only restarts when the team id changes
-  const myTeamId = myTeam?.id ?? null;
 
-  // Wait for scores to sync when we have a team — prevents the entry buttons from
-  // flashing briefly before an already-submitted score is loaded.
-  const loading = !teamsSynced || !gameStateSynced || (myTeamId !== null && !scoresSynced);
+  const loading = !teamsSynced || !gameSynced || (myTeamId !== null && !scoresSynced);
 
-  // Fetch userSub once on mount
   useEffect(() => {
     void fetchAuthSession().then((session) => {
       setUserSub((session.tokens?.accessToken?.payload.sub as string | undefined) ?? null);
     });
   }, []);
 
-  // Team + GameState streams — set loading false once both initial syncs complete
+  // Team stream — all teams (scorekeeper finds theirs by scorekeeperUserId)
   useEffect(() => {
-    const unsubTeam = subscribeLive(
+    return subscribeLive(
       () => client.models.Team.observeQuery({ authMode: 'userPool' }),
       ({ items, isSynced }) => {
         setAllTeams(items);
         if (isSynced) setTeamsSynced(true);
       }
     );
-    const unsubGs = subscribeLive(
-      () => client.models.GameState.observeQuery({ authMode: 'userPool' }),
+  }, []);
+
+  // Game stream — subscribed by gameId once we know the team's game
+  const gameId = myTeam?.gameId ?? null;
+  useEffect(() => {
+    if (!gameId) {
+      // No team yet — mark synced so we don't block forever
+      setGameSynced(true);
+      setGameItems([]);
+      return;
+    }
+    return subscribeLive(
+      () =>
+        client.models.Game.observeQuery({
+          authMode: 'userPool',
+          filter: { slug: { eq: gameId } },
+        }),
       ({ items, isSynced }) => {
-        setGameStateItems(items);
-        if (isSynced) setGameStateSynced(true);
+        setGameItems(items);
+        if (isSynced) setGameSynced(true);
       }
     );
-    return () => {
-      unsubTeam();
-      unsubGs();
-    };
-  }, []);
+  }, [gameId]);
 
   // Score stream — filtered to myTeam, reopens when the team changes
   useEffect(() => {
     if (!myTeamId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTeamScores([]);
       return;
     }
@@ -103,8 +108,8 @@ export default function ScorekeeperPage() {
     );
   }
 
-  // Admin pressed End Game — scoringOpen flipped to false via subscription
-  if (gameStateItems[0]?.scoringOpen === false) {
+  // Admin pressed End Game — scoringOpen flipped to false
+  if (game?.scoringOpen === false) {
     return <GameEndedView />;
   }
 
