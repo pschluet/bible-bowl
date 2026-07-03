@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Schema } from '@/amplify/data/resource';
 import GroupPill from '@/app/components/GroupPill';
-import { POINT_OPTIONS } from '@/app/lib/constants';
+import ScoreEditPopover from '@/app/components/ScoreEditPopover';
 
 type Team = Schema['Team']['type'];
 type Score = Schema['Score']['type'];
@@ -35,11 +35,36 @@ export default function ScoreGrid({
   onEnterScore,
   recentEntry,
 }: ScoreGridProps) {
-  // editing cell key: `${teamId}:${questionNumber}` or null (mouse click-to-edit flow)
-  const [editing, setEditing] = useState<string | null>(null);
+  // editing state: the clicked cell plus the anchor element (read live, not frozen DOMRect)
+  const [editing, setEditing] = useState<{
+    teamId: string;
+    q: number;
+    anchorEl: HTMLElement;
+  } | null>(null);
 
   // Refs to each <tr> so we can programmatically focus after arrow-key / number-key advances
   const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+  // Tracks whether we've done the one-shot auto-focus on mount; reset when game is inactive
+  const didInitialFocusRef = useRef(false);
+
+  // One-shot auto-focus: when the game becomes active, focus the selected (first) team row
+  // immediately so the scorekeeper can start pressing 0–3 without clicking or tabbing first.
+  // Uses preventScroll:true to avoid jarring page jumps. The ref guard ensures we only steal
+  // focus once per active-game session and not again after the user has clicked/tabbed away.
+  useEffect(() => {
+    if (currentQuestion === null) {
+      didInitialFocusRef.current = false; // reset when game is torn down
+      return;
+    }
+    if (didInitialFocusRef.current) return;
+    const targetId = selectedTeamId ?? teams[0]?.id;
+    if (!targetId) return;
+    const el = rowRefs.current.get(targetId);
+    if (el) {
+      didInitialFocusRef.current = true;
+      el.focus({ preventScroll: true });
+    }
+  }, [currentQuestion, selectedTeamId, teams]);
 
   // Focus the selected row when selection changes programmatically (not via Tab/click)
   useEffect(() => {
@@ -66,6 +91,9 @@ export default function ScoreGrid({
     onScoreChange(teamId, questionNumber, points);
     setEditing(null);
   }
+
+  const editingExisting =
+    editing !== null ? (scoreMap.get(editing.teamId)?.get(editing.q) ?? null) : null;
 
   if (teams.length === 0) {
     return (
@@ -113,6 +141,17 @@ export default function ScoreGrid({
                   if (currentQuestion !== null && ['0', '1', '2', '3'].includes(e.key)) {
                     e.preventDefault();
                     onEnterScore(team.id, Number(e.key));
+                  } else if (
+                    currentQuestion !== null &&
+                    (e.key === 'x' || e.key === 'X') &&
+                    onScoreDelete
+                  ) {
+                    const existing = byQuestion?.get(currentQuestion);
+                    if (existing) {
+                      e.preventDefault();
+                      onScoreDelete(existing.id);
+                      onSelectNext();
+                    }
                   } else if (e.key === 'ArrowDown') {
                     e.preventDefault();
                     onSelectNext();
@@ -139,8 +178,7 @@ export default function ScoreGrid({
 
                 {questionNumbers.map((q) => {
                   const existing = byQuestion?.get(q) ?? null;
-                  const cellKey = `${team.id}:${q}`;
-                  const isEditing = editing === cellKey;
+                  const isEditingThis = editing?.teamId === team.id && editing?.q === q;
                   const isCurrent = q === currentQuestion;
                   const isFlashing = isCurrent && recentEntry?.teamId === team.id;
                   // Selected row: bg-indigo-50; current-question column: bg-indigo-50;
@@ -161,40 +199,17 @@ export default function ScoreGrid({
                         <span className="flex h-7 w-full items-center justify-center rounded bg-green-500 text-xs font-bold text-white">
                           {recentEntry!.points}
                         </span>
-                      ) : isEditing ? (
-                        <div className="flex items-center justify-center gap-0.5">
-                          {POINT_OPTIONS.map((pts) => (
-                            <button
-                              key={pts}
-                              type="button"
-                              tabIndex={-1}
-                              onClick={() => handleSelect(team.id, q, pts)}
-                              className="h-7 w-7 rounded bg-indigo-600 text-xs font-semibold text-white hover:bg-indigo-700"
-                            >
-                              {pts}
-                            </button>
-                          ))}
-                          {existing && onScoreDelete && (
-                            <button
-                              type="button"
-                              tabIndex={-1}
-                              onClick={() => {
-                                onScoreDelete(existing.id);
-                                setEditing(null);
-                              }}
-                              className="h-7 w-7 rounded bg-gray-300 text-xs font-semibold text-gray-700 hover:bg-red-500 hover:text-white"
-                              title="Clear score"
-                            >
-                              ×
-                            </button>
-                          )}
-                        </div>
                       ) : (
                         <button
                           type="button"
                           tabIndex={-1}
-                          onClick={() => setEditing(cellKey)}
-                          className="h-7 w-full rounded text-gray-900 hover:bg-gray-100"
+                          onClick={(e) =>
+                            setEditing({ teamId: team.id, q, anchorEl: e.currentTarget })
+                          }
+                          className={[
+                            'h-7 w-full rounded text-gray-900 hover:bg-gray-100',
+                            isEditingThis ? 'ring-2 ring-indigo-400 ring-offset-1' : '',
+                          ].join(' ')}
                         >
                           {existing ? existing.points : '–'}
                         </button>
@@ -215,6 +230,27 @@ export default function ScoreGrid({
           })}
         </tbody>
       </table>
+
+      {editing !== null &&
+        (() => {
+          const editTeam = teams.find((t) => t.id === editing.teamId);
+          if (!editTeam) return null;
+          return (
+            <ScoreEditPopover
+              anchorEl={editing.anchorEl}
+              teamName={editTeam.name}
+              groupType={editTeam.groupType}
+              questionNumber={editing.q}
+              existingPoints={editingExisting?.points ?? null}
+              onSelect={(pts) => handleSelect(editing.teamId, editing.q, pts)}
+              onClear={() => {
+                if (editingExisting && onScoreDelete) onScoreDelete(editingExisting.id);
+                setEditing(null);
+              }}
+              onClose={() => setEditing(null)}
+            />
+          );
+        })()}
     </div>
   );
 }

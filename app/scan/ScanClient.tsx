@@ -4,15 +4,20 @@
  * Client-side scan handler. Receives the raw token string from the server
  * page (which reads searchParams without the Suspense requirement), then:
  *
- *   1. Checks for an existing valid scorekeeper session → redirect to /scorekeeper.
+ *   1. If there's no token, checks for an existing valid scorekeeper session
+ *      → redirect to /scorekeeper (returning-user convenience). A token in
+ *      the URL always means a fresh scan, so this check is skipped whenever
+ *      a token is present — otherwise re-scanning a different team's QR
+ *      while already signed in would just bounce back to the old team.
  *   2. Calls POST /api/scorekeeper/exchange with the token.
- *   3. Calls Amplify signIn() with USER_PASSWORD_AUTH to create a real session.
+ *   3. Signs out any existing session, then calls Amplify signIn() with
+ *      USER_PASSWORD_AUTH to create a real session for the scanned team.
  *   4. Redirects to /scorekeeper.
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { signIn, fetchAuthSession } from 'aws-amplify/auth';
+import { signIn, signOut, fetchAuthSession } from 'aws-amplify/auth';
 
 type Stage =
   | 'checking' // checking for an existing session
@@ -64,23 +69,29 @@ export default function ScanClient({ token }: { token: string | null }) {
     ranRef.current = true;
 
     async function run() {
-      // 1. If a valid scorekeeper session already exists, skip the exchange
-      try {
-        const existing = await fetchAuthSession({ forceRefresh: false });
-        if (existing.tokens?.accessToken) {
-          const groups =
-            (existing.tokens.accessToken.payload['cognito:groups'] as string[] | undefined) ?? [];
-          if (groups.includes('Scorekeepers')) {
-            setStage('redirecting');
-            router.replace('/scorekeeper');
-            return;
-          }
-        }
-      } catch {
-        // No session — continue with token exchange
-      }
-
+      // 1. No token in the URL: this isn't a fresh scan. If a valid
+      //    scorekeeper session already exists, skip straight to the score
+      //    form; otherwise prompt the user to scan a code. (When a token IS
+      //    present, we always treat it as a fresh scan and fall through to
+      //    the exchange below — even if a different team's session is
+      //    already active — so scanning a new team's QR actually switches
+      //    teams instead of bouncing back to the old one.)
       if (!token) {
+        try {
+          const existing = await fetchAuthSession({ forceRefresh: false });
+          if (existing.tokens?.accessToken) {
+            const groups =
+              (existing.tokens.accessToken.payload['cognito:groups'] as string[] | undefined) ?? [];
+            if (groups.includes('Scorekeepers')) {
+              setStage('redirecting');
+              router.replace('/scorekeeper');
+              return;
+            }
+          }
+        } catch {
+          // No session
+        }
+
         setStage('no-token');
         return;
       }
@@ -124,7 +135,17 @@ export default function ScanClient({ token }: { token: string | null }) {
         return;
       }
 
-      // 3. Sign in with the one-time credential to create a real Cognito session
+      // 3. Drop any existing session before signing in as the newly scanned
+      //    team — otherwise signIn() below would just no-op against the old
+      //    (still-valid) session via UserAlreadyAuthenticatedException,
+      //    leaving the scorekeeper stuck on the previous team.
+      try {
+        await signOut();
+      } catch {
+        // No prior session (or sign-out failed) — proceed to sign in anyway.
+      }
+
+      // 4. Sign in with the one-time credential to create a real Cognito session
       try {
         await signIn({
           username,
@@ -149,7 +170,7 @@ export default function ScanClient({ token }: { token: string | null }) {
         return;
       }
 
-      // 4. Session is now stored in cookies — redirect to the score form
+      // 5. Session is now stored in cookies — redirect to the score form
       setStage('redirecting');
       router.replace('/scorekeeper');
     }

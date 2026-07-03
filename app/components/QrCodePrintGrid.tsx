@@ -19,7 +19,7 @@ export default function QrCodePrintGrid({ tokens, onClose }: Props) {
   const origin = window.location.origin;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-white">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-white print:static print:inset-auto print:overflow-visible print:h-auto">
       {/* Print-only button bar */}
       <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-6 py-4 print:hidden">
         <h2 className="text-base font-semibold text-gray-900">QR Codes — All Teams</h2>
@@ -42,7 +42,7 @@ export default function QrCodePrintGrid({ tokens, onClose }: Props) {
       </div>
 
       {/* QR grid */}
-      <div className="grid grid-cols-3 gap-6 p-6 print:gap-4 print:p-4 md:grid-cols-4 lg:grid-cols-5">
+      <div className="grid grid-cols-3 gap-6 p-6 print:gap-4 print:p-4 print:h-auto print:overflow-visible md:grid-cols-4 lg:grid-cols-5">
         {tokens.map((token) => {
           const deepLink = `${origin}/scan?token=${token.tokenId}`;
           return (

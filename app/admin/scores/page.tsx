@@ -3,10 +3,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '@/amplify/data/resource';
-import { GAME_STATE_ID, compareTeamOrder, scoreId } from '@/app/lib/constants';
+import {
+  GAME_STATE_ID,
+  GROUP_LABELS,
+  GroupType,
+  compareTeamOrder,
+  scoreId,
+} from '@/app/lib/constants';
 import { subscribeLive } from '@/app/lib/liveQuery';
+import { downloadCsv, escapeCsvField, localTimestamp } from '@/app/lib/csv';
 import ScoreGrid from '@/app/components/ScoreGrid';
 import QuickEntryDrawer from '@/app/components/QuickEntryDrawer';
+import KeyboardLegend from '@/app/components/KeyboardLegend';
 
 type Team = Schema['Team']['type'];
 type Score = Schema['Score']['type'];
@@ -340,11 +348,45 @@ export default function AdminScoresPage() {
     }
   }, []);
 
+  const handleExport = useCallback(() => {
+    const questionNumbers = Array.from({ length: currentQuestion ?? 0 }, (_, i) => i + 1);
+
+    const header = ['Team', 'Type', ...questionNumbers.map((q) => `Q${q}`), 'Total'];
+
+    const rows = sortedTeams.map((team) => {
+      const byQuestion = scoreMap.get(team.id);
+      const typeLabel =
+        team.groupType && team.groupType in GROUP_LABELS
+          ? GROUP_LABELS[team.groupType as GroupType]
+          : '';
+      let total = 0;
+      const questionCells = questionNumbers.map((q) => {
+        const score = byQuestion?.get(q);
+        if (score !== undefined) {
+          total += score.points;
+          return String(score.points);
+        }
+        return '';
+      });
+      return [team.name, typeLabel, ...questionCells, String(total)];
+    });
+
+    const csvLines = [header, ...rows]
+      .map((fields) => fields.map(escapeCsvField).join(','))
+      .join('\n');
+
+    const filename = `bible-bowl-scores-${localTimestamp(new Date())}.csv`;
+    downloadCsv(filename, csvLines);
+  }, [currentQuestion, sortedTeams, scoreMap]);
+
   return (
     <div className="mx-auto max-w-5xl">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Scores</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-gray-900">Scores</h1>
+            {currentQuestion !== null && <KeyboardLegend />}
+          </div>
           {currentQuestion !== null && (
             <p className="text-sm text-gray-500">Current Question: {currentQuestion}</p>
           )}
@@ -391,19 +433,31 @@ export default function AdminScoresPage() {
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-indigo-600" />
         </div>
       ) : (
-        <ScoreGrid
-          teams={sortedTeams}
-          scoreMap={scoreMap}
-          currentQuestion={currentQuestion}
-          onScoreChange={saveScore}
-          onScoreDelete={handleScoreDelete}
-          selectedTeamId={selectedTeamId}
-          onSelect={selectTeam}
-          onSelectNext={selectNext}
-          onSelectPrev={selectPrev}
-          onEnterScore={enterScoreAndAdvance}
-          recentEntry={recentEntry}
-        />
+        <>
+          <ScoreGrid
+            teams={sortedTeams}
+            scoreMap={scoreMap}
+            currentQuestion={currentQuestion}
+            onScoreChange={saveScore}
+            onScoreDelete={handleScoreDelete}
+            selectedTeamId={selectedTeamId}
+            onSelect={selectTeam}
+            onSelectNext={selectNext}
+            onSelectPrev={selectPrev}
+            onEnterScore={enterScoreAndAdvance}
+            recentEntry={recentEntry}
+          />
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={loading || sortedTeams.length === 0}
+              className="rounded-md border border-indigo-600 px-4 py-2 text-sm font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
+            >
+              Export Scores
+            </button>
+          </div>
+        </>
       )}
 
       {quickEntryOpen && (
@@ -412,7 +466,6 @@ export default function AdminScoresPage() {
           scoreMap={scoreMap}
           currentQuestion={currentQuestion}
           selectedTeamId={selectedTeamId}
-          onSelect={selectTeam}
           onSelectNext={selectNext}
           onSelectPrev={selectPrev}
           onEnterScore={enterScoreAndAdvance}

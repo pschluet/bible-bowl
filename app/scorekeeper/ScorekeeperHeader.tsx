@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { signOut } from 'aws-amplify/auth';
 
@@ -14,13 +15,18 @@ export default function ScorekeeperHeader() {
   return (
     <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
       <span className="font-semibold text-indigo-700">Bible Bowl Scorekeeper</span>
-      <button
-        type="button"
-        onClick={handleSignOut}
-        className="text-sm font-medium text-gray-500 hover:text-gray-900"
-      >
-        Sign out
-      </button>
+      <div className="flex items-center gap-4">
+        <Link href="/" className="text-sm font-medium text-indigo-600 hover:text-indigo-800">
+          Leaderboard
+        </Link>
+        <button
+          type="button"
+          onClick={handleSignOut}
+          className="text-sm font-medium text-gray-500 hover:text-gray-900"
+        >
+          Sign out
+        </button>
+      </div>
     </header>
   );
 }

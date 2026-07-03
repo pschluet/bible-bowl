@@ -13,14 +13,13 @@ import Leaderboard, {
 } from '@/app/components/Leaderboard';
 
 const FAVORITE_KEY = 'bb_favorite';
-const SITE_URL = 'https://bible.pauldev.io/';
-
 const client = generateClient<Schema>();
 
 export default function ViewerPage() {
   const [favoriteTeamIds, setFavoriteTeamIds] = useState<Set<string>>(new Set());
   const [groups, setGroups] = useState<string[]>([]);
   const [qrExpanded, setQrExpanded] = useState(false);
+  const [siteUrl, setSiteUrl] = useState('');
   const [teamsSynced, setTeamsSynced] = useState(false);
   const [scoresSynced, setScoresSynced] = useState(false);
   const loading = !teamsSynced || !scoresSynced;
@@ -50,6 +49,12 @@ export default function ViewerPage() {
     }
     // Legacy: a bare team-id string.
     setFavoriteTeamIds(new Set([raw]));
+  }, []);
+
+  // Derive the site URL from the browser origin after mount (avoids SSR/hydration mismatch).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSiteUrl(window.location.origin);
   }, []);
 
   // Close full-screen QR on Escape
@@ -150,7 +155,8 @@ export default function ViewerPage() {
   const onFavorite = useCallback((id: string) => {
     setFavoriteTeamIds((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       if (next.size) localStorage.setItem(FAVORITE_KEY, JSON.stringify([...next]));
       else localStorage.removeItem(FAVORITE_KEY);
       return next;
@@ -167,7 +173,7 @@ export default function ViewerPage() {
         <p className="mt-1 text-sm text-gray-500">
           {currentQuestion === null ? 'Waiting to start' : `Question ${currentQuestion}`}
         </p>
-        {(isAdmin || isScorekeeper) && (
+        {isAdmin || isScorekeeper ? (
           <nav className="mt-2 flex justify-center gap-4">
             {isAdmin && (
               <Link
@@ -186,17 +192,28 @@ export default function ViewerPage() {
               </Link>
             )}
           </nav>
+        ) : (
+          <nav className="mt-2 flex justify-center">
+            <Link
+              href="/login"
+              className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+            >
+              Admin Login
+            </Link>
+          </nav>
         )}
 
         {/* QR thumbnail — top-right of header */}
-        <button
-          type="button"
-          onClick={() => setQrExpanded(true)}
-          aria-label="Show full-screen QR code"
-          className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 hover:bg-gray-100"
-        >
-          <QRCodeSVG value={SITE_URL} size={40} />
-        </button>
+        {siteUrl && (
+          <button
+            type="button"
+            onClick={() => setQrExpanded(true)}
+            aria-label="Show full-screen QR code"
+            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 hover:bg-gray-100"
+          >
+            <QRCodeSVG value={siteUrl} size={40} />
+          </button>
+        )}
       </header>
 
       {/* Full-screen QR overlay */}
@@ -207,14 +224,15 @@ export default function ViewerPage() {
           className="fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-6 bg-black p-6"
           onClick={() => setQrExpanded(false)}
         >
+          <p className="text-7xl font-bold text-white">Scan for Live Scores</p>
           <QRCodeSVG
-            value={SITE_URL}
+            value={siteUrl}
             size={500}
             bgColor="#000000"
             fgColor="#ffffff"
             className="h-auto w-full max-w-[500px]"
           />
-          <p className="text-lg font-medium text-white">{SITE_URL}</p>
+          <p className="text-lg font-medium text-white">{siteUrl}</p>
         </div>
       )}
 

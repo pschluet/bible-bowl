@@ -21,10 +21,10 @@ export default function ScorekeeperPage() {
   const [gameStateItems, setGameStateItems] = useState<GameState[]>([]);
   const [teamScores, setTeamScores] = useState<Score[]>([]);
 
-  // Track when each stream has completed its initial sync; loading derived directly
+  // Track when each stream has completed its initial sync
   const [teamsSynced, setTeamsSynced] = useState(false);
   const [gameStateSynced, setGameStateSynced] = useState(false);
-  const loading = !teamsSynced || !gameStateSynced;
+  const [scoresSynced, setScoresSynced] = useState(false);
 
   // Derived state
   const myTeam = useMemo(
@@ -39,13 +39,12 @@ export default function ScorekeeperPage() {
     if (!myTeam || currentQuestion === null) return null;
     return teamScores.find((s) => s.questionNumber === currentQuestion)?.points ?? null;
   }, [myTeam, currentQuestion, teamScores]);
-  const existingScoreId = useMemo(() => {
-    if (!myTeam || currentQuestion === null) return null;
-    return teamScores.find((s) => s.questionNumber === currentQuestion)?.id ?? null;
-  }, [myTeam, currentQuestion, teamScores]);
-
   // Primitive dep for the Score subscription so it only restarts when the team id changes
   const myTeamId = myTeam?.id ?? null;
+
+  // Wait for scores to sync when we have a team — prevents the entry buttons from
+  // flashing briefly before an already-submitted score is loaded.
+  const loading = !teamsSynced || !gameStateSynced || (myTeamId !== null && !scoresSynced);
 
   // Fetch userSub once on mount
   useEffect(() => {
@@ -89,7 +88,10 @@ export default function ScorekeeperPage() {
           authMode: 'userPool',
           filter: { teamId: { eq: myTeamId } },
         }),
-      ({ items }) => setTeamScores(items)
+      ({ items, isSynced }) => {
+        setTeamScores(items);
+        if (isSynced) setScoresSynced(true);
+      }
     );
   }, [myTeamId]);
 
@@ -124,7 +126,6 @@ export default function ScorekeeperPage() {
       team={myTeam}
       currentQuestion={currentQuestion}
       existingScore={existingScore}
-      scoreId={existingScoreId}
     />
   );
 }
