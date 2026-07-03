@@ -169,8 +169,14 @@ export default function ViewerPage() {
   return (
     <main className="flex min-h-full flex-col">
       <header className="relative border-b border-gray-200 bg-white px-4 py-4 text-center">
-        <h1 className="text-xl font-bold text-indigo-700">🏆 Bible Bowl Live Scores</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <h1 className="text-lg font-bold text-indigo-700 sm:text-3xl">🏆 Bible Bowl Live Scores</h1>
+        <p className="mt-1 flex items-center justify-center gap-2 text-sm font-semibold text-gray-500 sm:text-lg">
+          {currentQuestion !== null && (
+            <span className="relative flex h-3 w-3 shrink-0">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-75" />
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-amber-500" />
+            </span>
+          )}
           {currentQuestion === null ? 'Waiting to start' : `Question ${currentQuestion}`}
         </p>
         {isAdmin || isScorekeeper ? (
@@ -240,7 +246,6 @@ export default function ViewerPage() {
         teams={teams}
         favoriteTeamIds={favoriteTeamIds}
         onFavorite={onFavorite}
-        currentQuestion={currentQuestion}
         loading={loading}
       />
     </main>
