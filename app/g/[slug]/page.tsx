@@ -25,6 +25,7 @@ export default function GameLeaderboardPage({ params }: Props) {
 
   const [favoriteTeamIds, setFavoriteTeamIds] = useState<Set<string>>(new Set());
   const [groups, setGroups] = useState<string[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [qrExpanded, setQrExpanded] = useState(false);
   const [siteUrl, setSiteUrl] = useState('');
   const [teamsSynced, setTeamsSynced] = useState(false);
@@ -70,6 +71,15 @@ export default function GameLeaderboardPage({ params }: Props) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [qrExpanded]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMenuOpen(false);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
 
   useEffect(() => {
     void fetchAuthSession({ forceRefresh: false })
@@ -201,47 +211,82 @@ export default function GameLeaderboardPage({ params }: Props) {
           )}
           {currentQuestion === null ? 'Waiting to start' : `Question ${currentQuestion}`}
         </p>
-        <nav className="mt-2 flex justify-center gap-4">
-          <Link href="/" className="text-sm font-medium text-indigo-600 hover:text-indigo-800">
-            All Games
-          </Link>
-          {isAdmin && (
-            <Link
-              href="/admin/games"
-              className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
-            >
-              Admin
-            </Link>
-          )}
-          {isScorekeeper && (
-            <Link
-              href="/scorekeeper"
-              className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
-            >
-              Scorekeeper
-            </Link>
-          )}
-          {!isAdmin && !isScorekeeper && (
-            <Link
-              href="/login"
-              className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
-            >
-              Admin Login
-            </Link>
-          )}
-        </nav>
-
-        {/* QR thumbnail — top-right of header */}
-        {siteUrl && (
+        {/* Navigation menu — top-right of header */}
+        <div className="absolute right-3 top-1/2 -translate-y-1/2">
           <button
             type="button"
-            onClick={() => setQrExpanded(true)}
-            aria-label="Show full-screen QR code"
-            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 hover:bg-gray-100"
+            onClick={() => setMenuOpen((open) => !open)}
+            aria-label="Open menu"
+            aria-expanded={menuOpen}
+            className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-gray-100"
           >
-            <QRCodeSVG value={siteUrl} size={40} />
+            <span className="flex flex-col gap-1">
+              <span className="h-0.5 w-5 rounded-full bg-indigo-600" />
+              <span className="h-0.5 w-5 rounded-full bg-indigo-600" />
+              <span className="h-0.5 w-5 rounded-full bg-indigo-600" />
+            </span>
           </button>
-        )}
+
+          {menuOpen && (
+            <>
+              {/* Backdrop — transparent, full-screen, click to dismiss */}
+              <div
+                className="fixed inset-0 z-40"
+                aria-hidden="true"
+                onClick={() => setMenuOpen(false)}
+              />
+
+              <nav className="absolute right-0 z-50 mt-2 flex w-48 flex-col overflow-hidden rounded-md border border-gray-200 bg-white py-1 text-left shadow-lg">
+                <Link
+                  href="/"
+                  onClick={() => setMenuOpen(false)}
+                  className="block w-full px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-gray-100"
+                >
+                  All Games
+                </Link>
+                {isAdmin && (
+                  <Link
+                    href="/admin/games"
+                    onClick={() => setMenuOpen(false)}
+                    className="block w-full px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-gray-100"
+                  >
+                    Admin
+                  </Link>
+                )}
+                {isScorekeeper && (
+                  <Link
+                    href="/scorekeeper"
+                    onClick={() => setMenuOpen(false)}
+                    className="block w-full px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-gray-100"
+                  >
+                    Scorekeeper
+                  </Link>
+                )}
+                {!isAdmin && !isScorekeeper && (
+                  <Link
+                    href="/login"
+                    onClick={() => setMenuOpen(false)}
+                    className="block w-full px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-gray-100"
+                  >
+                    Admin Login
+                  </Link>
+                )}
+                {siteUrl && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQrExpanded(true);
+                      setMenuOpen(false);
+                    }}
+                    className="block w-full px-4 py-2 text-left text-sm font-medium text-indigo-600 hover:bg-gray-100"
+                  >
+                    Show QR
+                  </button>
+                )}
+              </nav>
+            </>
+          )}
+        </div>
       </header>
 
       {qrExpanded && (
