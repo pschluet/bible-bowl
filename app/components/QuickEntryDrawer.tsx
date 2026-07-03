@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import type { Schema } from '@/amplify/data/resource';
 import GroupPill from '@/app/components/GroupPill';
-import { POINT_OPTIONS } from '@/app/lib/constants';
+import ScoreButtonGrid from '@/app/components/ScoreButtonGrid';
 
 type Team = Schema['Team']['type'];
 type Score = Schema['Score']['type'];
@@ -178,26 +178,12 @@ export default function QuickEntryDrawer({
 
           {/* Big score buttons (0 – 3) */}
           {selectedTeam && currentQuestion !== null ? (
-            <div className="grid grid-cols-2 gap-4">
-              {POINT_OPTIONS.map((pts) => {
-                const isFlashing =
-                  recentEntry?.teamId === selectedTeam.id && recentEntry.points === pts;
-                return (
-                  <button
-                    key={pts}
-                    type="button"
-                    onClick={() => onEnterScore(selectedTeam.id, pts)}
-                    className={`flex h-24 sm:h-28 items-center justify-center rounded-xl border-2 text-4xl font-bold transition-colors ${
-                      isFlashing
-                        ? 'border-indigo-600 bg-indigo-600 text-white'
-                        : 'border-gray-300 text-gray-700 hover:border-indigo-500 hover:bg-indigo-50 active:bg-indigo-600 active:text-white'
-                    }`}
-                  >
-                    {pts}
-                  </button>
-                );
-              })}
-            </div>
+            <ScoreButtonGrid
+              onSelect={(pts) => onEnterScore(selectedTeam.id, pts)}
+              activeValue={
+                recentEntry?.teamId === selectedTeam.id ? recentEntry.points : null
+              }
+            />
           ) : (
             <p className="text-center text-gray-500">
               {currentQuestion === null ? 'Game not started.' : 'No team selected.'}
