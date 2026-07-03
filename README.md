@@ -52,13 +52,13 @@ The app serves three audiences:
 
 After the sandbox is running (or after your first deploy), create an admin and seed the game:
 
-1. Promote yourself to an admin. This creates the Cognito user (if needed) and adds it to the `Admins` group:
+1. Promote yourself to a SuperAdmin. This creates the Cognito user (if needed) and adds it to the `SuperAdmins` group:
 
    ```bash
-   npm run seed:admin -- your@email.com
+   npm run seed:admin -- your@email.com --super
    ```
 
-   If the user was newly created, check your email for a temporary password.
+   If the user was newly created, a temporary password is printed to the console.
 
 2. Log in at `/login` and set a permanent password.
 
@@ -68,7 +68,8 @@ After the sandbox is running (or after your first deploy), create an admin and s
 
 ## User Roles
 
-- **Admin** — created via the `seed:admin` script or in-app at `/admin/users`. Has full access under `/admin`.
+- **SuperAdmin** — created via `npm run seed:admin -- your@email.com --super`. Can manage all games and create/delete admin users.
+- **Admin** — created via the `seed:admin` script (without `--super`) or in-app at `/admin/users`. Has full access under `/admin`.
 - **Scorekeeper** — can self-register at `/login` (sign up), then claim an unclaimed team at `/scorekeeper`. Claiming is first-come-first-served. Admins can also pre-create scorekeepers via `/admin/users` and assign them a team.
 - **Viewer** — no login required. The live leaderboard is at `/`.
 
