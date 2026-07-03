@@ -7,6 +7,7 @@ import { GAME_STATE_ID, compareTeamOrder, scoreId } from '@/app/lib/constants';
 import { subscribeLive } from '@/app/lib/liveQuery';
 import ScoreGrid from '@/app/components/ScoreGrid';
 import QuickEntryDrawer from '@/app/components/QuickEntryDrawer';
+import KeyboardLegend from '@/app/components/KeyboardLegend';
 
 type Team = Schema['Team']['type'];
 type Score = Schema['Score']['type'];
@@ -344,7 +345,10 @@ export default function AdminScoresPage() {
     <div className="mx-auto max-w-5xl">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Scores</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-gray-900">Scores</h1>
+            {currentQuestion !== null && <KeyboardLegend />}
+          </div>
           {currentQuestion !== null && (
             <p className="text-sm text-gray-500">Current Question: {currentQuestion}</p>
           )}

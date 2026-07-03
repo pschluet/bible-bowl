@@ -40,6 +40,27 @@ export default function ScoreGrid({
 
   // Refs to each <tr> so we can programmatically focus after arrow-key / number-key advances
   const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+  // Tracks whether we've done the one-shot auto-focus on mount; reset when game is inactive
+  const didInitialFocusRef = useRef(false);
+
+  // One-shot auto-focus: when the game becomes active, focus the selected (first) team row
+  // immediately so the scorekeeper can start pressing 0–3 without clicking or tabbing first.
+  // Uses preventScroll:true to avoid jarring page jumps. The ref guard ensures we only steal
+  // focus once per active-game session and not again after the user has clicked/tabbed away.
+  useEffect(() => {
+    if (currentQuestion === null) {
+      didInitialFocusRef.current = false; // reset when game is torn down
+      return;
+    }
+    if (didInitialFocusRef.current) return;
+    const targetId = selectedTeamId ?? teams[0]?.id;
+    if (!targetId) return;
+    const el = rowRefs.current.get(targetId);
+    if (el) {
+      didInitialFocusRef.current = true;
+      el.focus({ preventScroll: true });
+    }
+  }, [currentQuestion, selectedTeamId, teams]);
 
   // Focus the selected row when selection changes programmatically (not via Tab/click)
   useEffect(() => {
@@ -113,6 +134,17 @@ export default function ScoreGrid({
                   if (currentQuestion !== null && ['0', '1', '2', '3'].includes(e.key)) {
                     e.preventDefault();
                     onEnterScore(team.id, Number(e.key));
+                  } else if (
+                    currentQuestion !== null &&
+                    (e.key === 'x' || e.key === 'X') &&
+                    onScoreDelete
+                  ) {
+                    const existing = byQuestion?.get(currentQuestion);
+                    if (existing) {
+                      e.preventDefault();
+                      onScoreDelete(existing.id);
+                      onSelectNext();
+                    }
                   } else if (e.key === 'ArrowDown') {
                     e.preventDefault();
                     onSelectNext();
