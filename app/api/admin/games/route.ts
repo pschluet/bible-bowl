@@ -25,6 +25,16 @@ import type { Schema } from '@/amplify/data/resource';
 import { getServerSession } from '@/app/lib/auth';
 import { makeCognitoClient, USER_POOL_ID } from '@/app/lib/cognito';
 import { listAll, normalizeSlug, validateSlug } from '@/app/lib/constants';
+import { mapWithConcurrency, withRetry, RETRYABLE_RE } from '@/app/lib/concurrency';
+
+// Allow up to 60 s on serverless hosts for large game deletions
+export const maxDuration = 60;
+
+/**
+ * Maximum simultaneous in-flight delete mutations.  Kept low to stay inside
+ * AppSync / DynamoDB / Cognito admin-API rate limits at full scale (~4 000 scores).
+ */
+const DELETE_CONCURRENCY = 5;
 
 // ---------------------------------------------------------------------------
 // POST /api/admin/games — create a game
@@ -140,51 +150,96 @@ export async function DELETE(request: Request) {
     .filter((t) => t.scorekeeperEmail)
     .map((t) => t.scorekeeperEmail as string);
 
-  await Promise.allSettled(
-    gameScorekeeperUsernames.map(async (username) => {
-      try {
-        await cognitoClient.send(
-          new AdminUserGlobalSignOutCommand({ UserPoolId: USER_POOL_ID, Username: username })
-        );
-      } catch {
-        // Non-fatal
-      }
-      return cognitoClient.send(
-        new AdminDeleteUserCommand({ UserPoolId: USER_POOL_ID, Username: username })
+  // Bounded concurrency prevents Cognito admin-API rate limits.
+  // Sign-out and delete are both best-effort (user may already be gone).
+  await mapWithConcurrency(gameScorekeeperUsernames, DELETE_CONCURRENCY, async (username) => {
+    try {
+      await cognitoClient.send(
+        new AdminUserGlobalSignOutCommand({ UserPoolId: USER_POOL_ID, Username: username })
       );
-    })
+    } catch {
+      // best-effort — session may already be expired
+    }
+    try {
+      await withRetry(() =>
+        cognitoClient.send(
+          new AdminDeleteUserCommand({ UserPoolId: USER_POOL_ID, Username: username })
+        )
+      );
+    } catch (err) {
+      console.error(`Scorekeeper deletion failed for ${username} (non-fatal):`, err);
+    }
+  });
+
+  // 2. Delete all scores for this game (paginated).
+  //    ~4 000 records at full scale — bounded concurrency + retry keeps us inside
+  //    AppSync / DynamoDB write-capacity limits.
+  const scores = await listAll((opts) =>
+    apiKeyClient.models.Score.list({ ...opts, filter: { gameId: { eq: gameId } } })
   );
-
-  // 2. Delete all scores for this game (paginated)
-  try {
-    const scores = await listAll((opts) =>
-      apiKeyClient.models.Score.list({ ...opts, filter: { gameId: { eq: gameId } } })
+  const scoreFailures: string[] = [];
+  await mapWithConcurrency(scores, DELETE_CONCURRENCY, async (s) => {
+    try {
+      await withRetry(async () => {
+        const { errors } = await userPoolClient.models.Score.delete({ id: s.id });
+        if (errors?.some((e) => RETRYABLE_RE.test(e.message))) {
+          throw new Error(errors[0].message);
+        }
+      });
+    } catch (err) {
+      scoreFailures.push(s.id);
+      console.error(`Score deletion failed for ${s.id}:`, err);
+    }
+  });
+  if (scoreFailures.length > 0) {
+    return NextResponse.json(
+      { error: `Failed to delete ${scoreFailures.length} score record(s). Please try again.` },
+      { status: 500 }
     );
-    await Promise.all(scores.map((s) => userPoolClient.models.Score.delete({ id: s.id })));
-  } catch (err) {
-    console.error('Score deletion failed (non-fatal):', err);
   }
 
-  // 3. Delete all tokens for this game
-  try {
-    const tokens = await listAll((opts) =>
-      apiKeyClient.models.OnboardingToken.list({ ...opts, filter: { gameId: { eq: gameId } } })
+  // 3. Delete all tokens for this game (non-fatal — tokens are already consumed/expired).
+  const tokens = await listAll((opts) =>
+    apiKeyClient.models.OnboardingToken.list({ ...opts, filter: { gameId: { eq: gameId } } })
+  );
+  await mapWithConcurrency(tokens, DELETE_CONCURRENCY, async (t) => {
+    try {
+      await withRetry(async () => {
+        const { errors } = await apiKeyClient.models.OnboardingToken.delete({
+          tokenId: t.tokenId,
+        });
+        if (errors?.some((e) => RETRYABLE_RE.test(e.message))) {
+          throw new Error(errors[0].message);
+        }
+      });
+    } catch (err) {
+      console.error(`Token deletion failed for ${t.tokenId} (non-fatal):`, err);
+    }
+  });
+
+  // 4. Delete all teams for this game.
+  const teamFailures: string[] = [];
+  await mapWithConcurrency(gameTeams, DELETE_CONCURRENCY, async (t) => {
+    try {
+      await withRetry(async () => {
+        const { errors } = await userPoolClient.models.Team.delete({ id: t.id });
+        if (errors?.some((e) => RETRYABLE_RE.test(e.message))) {
+          throw new Error(errors[0].message);
+        }
+      });
+    } catch (err) {
+      teamFailures.push(t.id);
+      console.error(`Team deletion failed for ${t.id}:`, err);
+    }
+  });
+  if (teamFailures.length > 0) {
+    return NextResponse.json(
+      { error: `Failed to delete ${teamFailures.length} team(s). Please try again.` },
+      { status: 500 }
     );
-    await Promise.all(
-      tokens.map((t) => apiKeyClient.models.OnboardingToken.delete({ tokenId: t.tokenId }))
-    );
-  } catch (err) {
-    console.error('Token deletion failed (non-fatal):', err);
   }
 
-  // 4. Delete all teams for this game
-  try {
-    await Promise.all(gameTeams.map((t) => userPoolClient.models.Team.delete({ id: t.id })));
-  } catch (err) {
-    console.error('Team deletion failed (non-fatal):', err);
-  }
-
-  // 5. Delete the game itself
+  // 5. Delete the game itself.
   const { errors } = await userPoolClient.models.Game.delete({ slug: gameId });
   if (errors && errors.length > 0) {
     console.error('Game deletion errors:', errors);
