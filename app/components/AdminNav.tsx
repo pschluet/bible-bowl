@@ -65,7 +65,7 @@ export default function AdminNav({ adminEmail }: { adminEmail: string }) {
           <span className="text-lg font-bold text-indigo-600">Bible Bowl</span>
           <p className="text-xs text-gray-400">Admin</p>
         </div>
-        <nav className="flex flex-1 flex-col gap-1 px-3">
+        <nav className="flex flex-1 flex-col gap-1 px-3 pb-3">
           {LINKS.map((link) => (
             <Link
               key={link.href}
