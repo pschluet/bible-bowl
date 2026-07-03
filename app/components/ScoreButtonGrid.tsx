@@ -36,15 +36,15 @@ export default function ScoreButtonGrid({
           <button
             key={points}
             type="button"
-            disabled={disabled}
+            aria-disabled={disabled}
             aria-busy={isPending}
-            onClick={() => onSelect(points)}
+            onClick={() => { if (!disabled) onSelect(points); }}
             className={[
               'flex aspect-square items-center justify-center rounded-2xl border-2 font-bold shadow-sm transition-all',
               isPending || isActive
                 ? 'border-indigo-600 bg-indigo-600 text-white'
                 : 'border-gray-300 bg-white text-gray-700 hover:border-indigo-500 hover:bg-indigo-50 active:scale-95 active:border-indigo-600 active:bg-indigo-600 active:text-white',
-              isDimmed ? 'opacity-40' : '',
+              isDimmed ? 'cursor-not-allowed opacity-40' : '',
             ]
               .filter(Boolean)
               .join(' ')}
