@@ -1,192 +1,68 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import { fetchAuthSession } from 'aws-amplify/auth';
+import Link from 'next/link';
 import type { Schema } from '@/amplify/data/resource';
 import { subscribeLive } from '@/app/lib/liveQuery';
-import Link from 'next/link';
-import { QRCodeSVG } from 'qrcode.react';
-import Leaderboard, {
-  type LeaderboardTeam,
-  type ScoreHistoryEntry,
-} from '@/app/components/Leaderboard';
 
-const FAVORITE_KEY = 'bb_favorite';
+type Game = Schema['Game']['type'];
+
 const client = generateClient<Schema>();
 
-export default function ViewerPage() {
-  const [favoriteTeamIds, setFavoriteTeamIds] = useState<Set<string>>(new Set());
+export default function GamePickerPage() {
+  const [games, setGames] = useState<Game[]>([]);
+  const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<string[]>([]);
-  const [qrExpanded, setQrExpanded] = useState(false);
-  const [siteUrl, setSiteUrl] = useState('');
-  const [teamsSynced, setTeamsSynced] = useState(false);
-  const [scoresSynced, setScoresSynced] = useState(false);
-  const loading = !teamsSynced || !scoresSynced;
-
-  // authMode is null until the session check resolves; subscriptions open only after.
   const [authMode, setAuthMode] = useState<'userPool' | 'iam' | null>(null);
 
-  // Raw stream state — derived LeaderboardTeam[] computed in useMemo below
-  const [rawTeams, setRawTeams] = useState<Schema['Team']['type'][]>([]);
-  const [rawScores, setRawScores] = useState<Schema['Score']['type'][]>([]);
-  const [currentQuestion, setCurrentQuestion] = useState<number | null>(null);
-
-  useEffect(() => {
-    // localStorage is unavailable during SSR, so read it after mount.
-    // Support both the new JSON-array format and the legacy plain-string format.
-    const raw = localStorage.getItem(FAVORITE_KEY);
-    if (!raw) return;
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setFavoriteTeamIds(new Set(parsed as string[]));
-        return;
-      }
-    } catch {
-      // Not valid JSON — fall through to legacy handling.
-    }
-    // Legacy: a bare team-id string.
-    setFavoriteTeamIds(new Set([raw]));
-  }, []);
-
-  // Derive the site URL from the browser origin after mount (avoids SSR/hydration mismatch).
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSiteUrl(window.location.origin);
-  }, []);
-
-  // Close full-screen QR on Escape
-  useEffect(() => {
-    if (!qrExpanded) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setQrExpanded(false);
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [qrExpanded]);
-
-  // Resolve auth once on mount. allow.guest() compiles to identityPool IAM;
-  // allow.authenticated() compiles to Cognito user-pools "private". Pick the
-  // right mode so both states get through.
   useEffect(() => {
     void fetchAuthSession({ forceRefresh: false })
       .catch(() => null)
       .then((session) => {
-        const mode: 'userPool' | 'iam' = session?.tokens?.accessToken ? 'userPool' : 'iam';
-        setAuthMode(mode);
+        setAuthMode(session?.tokens?.accessToken ? 'userPool' : 'iam');
         setGroups(
           (session?.tokens?.accessToken?.payload['cognito:groups'] as string[] | undefined) ?? []
         );
       });
   }, []);
 
-  // Team stream — open once authMode is known.
   useEffect(() => {
     if (!authMode) return;
     const mode = authMode;
     return subscribeLive(
-      () => client.models.Team.observeQuery({ authMode: mode }),
+      () => client.models.Game.observeQuery({ authMode: mode }),
       ({ items, isSynced }) => {
-        setRawTeams(items);
-        if (isSynced) setTeamsSynced(true);
+        setGames(items);
+        if (isSynced) setLoading(false);
       }
     );
   }, [authMode]);
 
-  // Score stream — gate loading on isSynced so the leaderboard paints fully populated.
-  useEffect(() => {
-    if (!authMode) return;
-    const mode = authMode;
-    return subscribeLive(
-      () => client.models.Score.observeQuery({ authMode: mode }),
-      ({ items, isSynced }) => {
-        setRawScores(items);
-        if (isSynced) setScoresSynced(true);
-      }
-    );
-  }, [authMode]);
+  const sortedGames = useMemo(
+    () => [...games].sort((a, b) => a.title.localeCompare(b.title)),
+    [games]
+  );
 
-  // GameState stream
-  useEffect(() => {
-    if (!authMode) return;
-    const mode = authMode;
-    return subscribeLive(
-      () => client.models.GameState.observeQuery({ authMode: mode }),
-      ({ items }) => setCurrentQuestion(items[0]?.currentQuestion ?? null)
-    );
-  }, [authMode]);
-
-  // Derive the leaderboard data from raw stream state.
-  // De-dupe scores, sum totals, build history, sort — same logic as the old fetchData.
-  const teams = useMemo((): LeaderboardTeam[] => {
-    // De-dupe: keep only the latest record per (teamId, questionNumber) by updatedAt.
-    // This guards against duplicate Score records that may exist from prior bugs.
-    const latestByCell = new Map<string, (typeof rawScores)[number]>();
-    for (const s of rawScores) {
-      const k = `${s.teamId}#${s.questionNumber}`;
-      const prev = latestByCell.get(k);
-      if (!prev || (s.updatedAt ?? '') > (prev.updatedAt ?? '')) latestByCell.set(k, s);
-    }
-
-    const totals = new Map<string, number>();
-    const historyByTeam = new Map<string, ScoreHistoryEntry[]>();
-    for (const score of latestByCell.values()) {
-      totals.set(score.teamId, (totals.get(score.teamId) ?? 0) + (score.points ?? 0));
-      const arr = historyByTeam.get(score.teamId) ?? [];
-      arr.push({ questionNumber: score.questionNumber, points: score.points ?? 0 });
-      historyByTeam.set(score.teamId, arr);
-    }
-
-    return rawTeams
-      .map((team) => ({
-        id: team.id,
-        name: team.name,
-        total: totals.get(team.id) ?? 0,
-        groupType: team.groupType ?? null,
-        history: (historyByTeam.get(team.id) ?? []).sort(
-          (a, b) => a.questionNumber - b.questionNumber
-        ),
-      }))
-      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
-  }, [rawTeams, rawScores]);
-
-  const onFavorite = useCallback((id: string) => {
-    setFavoriteTeamIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      if (next.size) localStorage.setItem(FAVORITE_KEY, JSON.stringify([...next]));
-      else localStorage.removeItem(FAVORITE_KEY);
-      return next;
-    });
-  }, []);
-
-  const isAdmin = groups.includes('Admins');
+  const isAdmin = groups.includes('Admins') || groups.includes('SuperAdmins');
   const isScorekeeper = groups.includes('Scorekeepers');
 
   return (
-    <main className="flex min-h-full flex-col">
-      <header className="relative border-b border-gray-200 bg-white px-4 py-4 text-center">
-        <h1 className="text-lg font-bold text-indigo-700 sm:text-3xl">🏆 Bible Bowl Live Scores</h1>
-        <p className="mt-1 flex items-center justify-center gap-2 text-sm font-semibold text-gray-500 sm:text-lg">
-          {currentQuestion !== null && (
-            <span className="relative flex h-3 w-3 shrink-0">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-75" />
-              <span className="relative inline-flex h-3 w-3 rounded-full bg-amber-500" />
-            </span>
-          )}
-          {currentQuestion === null ? 'Waiting to start' : `Question ${currentQuestion}`}
-        </p>
-        {isAdmin || isScorekeeper ? (
-          <nav className="mt-2 flex justify-center gap-4">
+    <main className="flex min-h-screen flex-col items-center bg-gray-50 px-4 py-12">
+      <header className="mb-10 text-center">
+        <h1 className="text-3xl font-bold text-indigo-700">🏆 Bible Bowl</h1>
+        <p className="mt-2 text-gray-500">Select a game to view the live leaderboard</p>
+
+        {/* Quick nav for logged-in users */}
+        {(isAdmin || isScorekeeper) && (
+          <nav className="mt-4 flex justify-center gap-4">
             {isAdmin && (
               <Link
-                href="/admin/scores"
+                href="/admin/games"
                 className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
               >
-                Admin
+                Admin Dashboard
               </Link>
             )}
             {isScorekeeper && (
@@ -198,8 +74,9 @@ export default function ViewerPage() {
               </Link>
             )}
           </nav>
-        ) : (
-          <nav className="mt-2 flex justify-center">
+        )}
+        {!isAdmin && !isScorekeeper && (
+          <nav className="mt-4 flex justify-center">
             <Link
               href="/login"
               className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
@@ -208,46 +85,34 @@ export default function ViewerPage() {
             </Link>
           </nav>
         )}
-
-        {/* QR thumbnail — top-right of header */}
-        {siteUrl && (
-          <button
-            type="button"
-            onClick={() => setQrExpanded(true)}
-            aria-label="Show full-screen QR code"
-            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 hover:bg-gray-100"
-          >
-            <QRCodeSVG value={siteUrl} size={40} />
-          </button>
-        )}
       </header>
 
-      {/* Full-screen QR overlay */}
-      {qrExpanded && (
-        <div
-          role="dialog"
-          aria-label="Full-screen QR code"
-          className="fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-6 bg-black p-6"
-          onClick={() => setQrExpanded(false)}
-        >
-          <p className="text-7xl font-bold text-white">Scan for Live Scores</p>
-          <QRCodeSVG
-            value={siteUrl}
-            size={500}
-            bgColor="#000000"
-            fgColor="#ffffff"
-            className="h-auto w-full max-w-[500px]"
-          />
-          <p className="text-lg font-medium text-white">{siteUrl}</p>
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-indigo-600" />
         </div>
+      ) : sortedGames.length === 0 ? (
+        <div className="rounded-lg border border-gray-200 bg-white p-10 text-center text-gray-400">
+          No games are currently available.
+        </div>
+      ) : (
+        <ul className="w-full max-w-md divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
+          {sortedGames.map((game) => (
+            <li key={game.slug}>
+              <Link
+                href={`/g/${game.slug}`}
+                className="flex items-center gap-3 px-5 py-4 hover:bg-indigo-50"
+              >
+                <div className="flex-1">
+                  <p className="font-semibold text-gray-900">{game.title}</p>
+                  <p className="text-xs text-gray-400 font-mono mt-0.5">/g/{game.slug}</p>
+                </div>
+                <span className="text-gray-400 text-sm">→</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       )}
-
-      <Leaderboard
-        teams={teams}
-        favoriteTeamIds={favoriteTeamIds}
-        onFavorite={onFavorite}
-        loading={loading}
-      />
     </main>
   );
 }

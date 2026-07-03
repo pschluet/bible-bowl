@@ -17,7 +17,7 @@ export default async function ScorekeeperLayout({ children }: { children: React.
 
   // Admin who wandered to /scorekeeper — send them back to the admin area
   if (!session.isScorekeeper) {
-    redirect('/admin/scores');
+    redirect('/admin/games');
   }
 
   return (

@@ -1,0 +1,321 @@
+'use client';
+
+import { use, useCallback, useEffect, useMemo, useState } from 'react';
+import { generateClient } from 'aws-amplify/data';
+import { fetchAuthSession } from 'aws-amplify/auth';
+import { notFound } from 'next/navigation';
+import type { Schema } from '@/amplify/data/resource';
+import { subscribeLive } from '@/app/lib/liveQuery';
+import Link from 'next/link';
+import { QRCodeSVG } from 'qrcode.react';
+import Leaderboard, {
+  type LeaderboardTeam,
+  type ScoreHistoryEntry,
+} from '@/app/components/Leaderboard';
+
+const FAVORITE_KEY = 'bb_favorite';
+const client = generateClient<Schema>();
+
+interface Props {
+  params: Promise<{ slug: string }>;
+}
+
+export default function GameLeaderboardPage({ params }: Props) {
+  const { slug } = use(params);
+
+  const [favoriteTeamIds, setFavoriteTeamIds] = useState<Set<string>>(new Set());
+  const [groups, setGroups] = useState<string[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [qrExpanded, setQrExpanded] = useState(false);
+  const [siteUrl, setSiteUrl] = useState('');
+  const [teamsSynced, setTeamsSynced] = useState(false);
+  const [scoresSynced, setScoresSynced] = useState(false);
+  const [gameSynced, setGameSynced] = useState(false);
+  const [gameNotFound, setGameNotFound] = useState(false);
+  const loading = !teamsSynced || !scoresSynced || !gameSynced;
+
+  const [authMode, setAuthMode] = useState<'userPool' | 'iam' | null>(null);
+
+  const [rawTeams, setRawTeams] = useState<Schema['Team']['type'][]>([]);
+  const [rawScores, setRawScores] = useState<Schema['Score']['type'][]>([]);
+  const [game, setGame] = useState<Schema['Game']['type'] | null>(null);
+
+  const currentQuestion = game?.currentQuestion ?? null;
+
+  useEffect(() => {
+    const raw = localStorage.getItem(FAVORITE_KEY);
+    if (!raw) return;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setFavoriteTeamIds(new Set(parsed as string[]));
+        return;
+      }
+    } catch {
+      // Not valid JSON — fall through to legacy handling.
+    }
+    setFavoriteTeamIds(new Set([raw]));
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSiteUrl(window.location.href);
+  }, []);
+
+  useEffect(() => {
+    if (!qrExpanded) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setQrExpanded(false);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [qrExpanded]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMenuOpen(false);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    void fetchAuthSession({ forceRefresh: false })
+      .catch(() => null)
+      .then((session) => {
+        const mode: 'userPool' | 'iam' = session?.tokens?.accessToken ? 'userPool' : 'iam';
+        setAuthMode(mode);
+        setGroups(
+          (session?.tokens?.accessToken?.payload['cognito:groups'] as string[] | undefined) ?? []
+        );
+      });
+  }, []);
+
+  // Game stream — filtered to this slug
+  useEffect(() => {
+    if (!authMode) return;
+    const mode = authMode;
+    return subscribeLive(
+      () =>
+        client.models.Game.observeQuery({
+          authMode: mode,
+          filter: { slug: { eq: slug } },
+        }),
+      ({ items, isSynced }) => {
+        if (isSynced) {
+          setGameSynced(true);
+          if (items.length === 0) setGameNotFound(true);
+        }
+        setGame(items[0] ?? null);
+      }
+    );
+  }, [authMode, slug]);
+
+  // Team stream — filtered to this game
+  useEffect(() => {
+    if (!authMode) return;
+    const mode = authMode;
+    return subscribeLive(
+      () =>
+        client.models.Team.observeQuery({
+          authMode: mode,
+          filter: { gameId: { eq: slug } },
+        }),
+      ({ items, isSynced }) => {
+        setRawTeams(items);
+        if (isSynced) setTeamsSynced(true);
+      }
+    );
+  }, [authMode, slug]);
+
+  // Score stream — filtered to this game
+  useEffect(() => {
+    if (!authMode) return;
+    const mode = authMode;
+    return subscribeLive(
+      () =>
+        client.models.Score.observeQuery({
+          authMode: mode,
+          filter: { gameId: { eq: slug } },
+        }),
+      ({ items, isSynced }) => {
+        setRawScores(items);
+        if (isSynced) setScoresSynced(true);
+      }
+    );
+  }, [authMode, slug]);
+
+  const teams = useMemo((): LeaderboardTeam[] => {
+    const latestByCell = new Map<string, (typeof rawScores)[number]>();
+    for (const s of rawScores) {
+      const k = `${s.teamId}#${s.questionNumber}`;
+      const prev = latestByCell.get(k);
+      if (!prev || (s.updatedAt ?? '') > (prev.updatedAt ?? '')) latestByCell.set(k, s);
+    }
+
+    const totals = new Map<string, number>();
+    const historyByTeam = new Map<string, ScoreHistoryEntry[]>();
+    for (const score of latestByCell.values()) {
+      totals.set(score.teamId, (totals.get(score.teamId) ?? 0) + (score.points ?? 0));
+      const arr = historyByTeam.get(score.teamId) ?? [];
+      arr.push({ questionNumber: score.questionNumber, points: score.points ?? 0 });
+      historyByTeam.set(score.teamId, arr);
+    }
+
+    return rawTeams
+      .map((team) => ({
+        id: team.id,
+        name: team.name,
+        total: totals.get(team.id) ?? 0,
+        groupType: team.groupType ?? null,
+        history: (historyByTeam.get(team.id) ?? []).sort(
+          (a, b) => a.questionNumber - b.questionNumber
+        ),
+      }))
+      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+  }, [rawTeams, rawScores]);
+
+  const onFavorite = useCallback((id: string) => {
+    setFavoriteTeamIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      if (next.size) localStorage.setItem(FAVORITE_KEY, JSON.stringify([...next]));
+      else localStorage.removeItem(FAVORITE_KEY);
+      return next;
+    });
+  }, []);
+
+  // Show 404 after the game subscription has synced and found nothing
+  if (gameNotFound && !loading) {
+    notFound();
+  }
+
+  const isAdmin = groups.includes('Admins') || groups.includes('SuperAdmins');
+  const isScorekeeper = groups.includes('Scorekeepers');
+
+  return (
+    <main className="flex min-h-full flex-col">
+      <header className="relative border-b border-gray-200 bg-white px-4 py-4 text-center">
+        <h1 className="text-lg font-bold text-indigo-700 sm:text-3xl">
+          {game ? game.title : '🏆 Bible Bowl Live Scores'}
+        </h1>
+        <p className="mt-1 flex items-center justify-center gap-2 text-sm font-semibold text-gray-500 sm:text-lg">
+          {currentQuestion !== null && (
+            <span className="relative flex h-3 w-3 shrink-0">
+              <span className="absolute inline-flex h-full w-full animate-[ping-slow_2.5s_cubic-bezier(0,0,0.2,1)_infinite] rounded-full bg-amber-500 opacity-75" />
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-amber-500" />
+            </span>
+          )}
+          {currentQuestion === null ? 'Waiting to start' : `Question ${currentQuestion}`}
+        </p>
+        {/* Navigation menu — top-right of header */}
+        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+          <button
+            type="button"
+            onClick={() => setMenuOpen((open) => !open)}
+            aria-label="Open menu"
+            aria-expanded={menuOpen}
+            className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-gray-100"
+          >
+            <span className="flex flex-col gap-1">
+              <span className="h-0.5 w-5 rounded-full bg-indigo-600" />
+              <span className="h-0.5 w-5 rounded-full bg-indigo-600" />
+              <span className="h-0.5 w-5 rounded-full bg-indigo-600" />
+            </span>
+          </button>
+
+          {menuOpen && (
+            <>
+              {/* Backdrop — transparent, full-screen, click to dismiss */}
+              <div
+                className="fixed inset-0 z-40"
+                aria-hidden="true"
+                onClick={() => setMenuOpen(false)}
+              />
+
+              <nav className="absolute right-0 z-50 mt-2 flex w-48 flex-col overflow-hidden rounded-md border border-gray-200 bg-white py-1 text-left shadow-lg">
+                <Link
+                  href="/"
+                  onClick={() => setMenuOpen(false)}
+                  className="block w-full px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-gray-100"
+                >
+                  All Games
+                </Link>
+                {isAdmin && (
+                  <Link
+                    href="/admin/games"
+                    onClick={() => setMenuOpen(false)}
+                    className="block w-full px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-gray-100"
+                  >
+                    Admin
+                  </Link>
+                )}
+                {isScorekeeper && (
+                  <Link
+                    href="/scorekeeper"
+                    onClick={() => setMenuOpen(false)}
+                    className="block w-full px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-gray-100"
+                  >
+                    Scorekeeper
+                  </Link>
+                )}
+                {!isAdmin && !isScorekeeper && (
+                  <Link
+                    href="/login"
+                    onClick={() => setMenuOpen(false)}
+                    className="block w-full px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-gray-100"
+                  >
+                    Admin Login
+                  </Link>
+                )}
+                {siteUrl && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQrExpanded(true);
+                      setMenuOpen(false);
+                    }}
+                    className="block w-full px-4 py-2 text-left text-sm font-medium text-indigo-600 hover:bg-gray-100"
+                  >
+                    Show QR
+                  </button>
+                )}
+              </nav>
+            </>
+          )}
+        </div>
+      </header>
+
+      {qrExpanded && (
+        <div
+          role="dialog"
+          aria-label="Full-screen QR code"
+          className="fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-6 bg-black p-6"
+          onClick={() => setQrExpanded(false)}
+        >
+          <p className="text-center text-4xl font-bold text-white sm:text-7xl">
+            Scan for Live Scores
+          </p>
+          <QRCodeSVG
+            value={siteUrl}
+            size={500}
+            bgColor="#000000"
+            fgColor="#ffffff"
+            className="h-auto w-full max-w-[500px]"
+          />
+          <p className="text-lg font-medium text-white">{siteUrl}</p>
+        </div>
+      )}
+
+      <Leaderboard
+        teams={teams}
+        favoriteTeamIds={favoriteTeamIds}
+        onFavorite={onFavorite}
+        loading={loading}
+      />
+    </main>
+  );
+}

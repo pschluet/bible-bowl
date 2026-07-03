@@ -93,7 +93,7 @@ The backend CDK stack creates a scoped IAM user for Cognito admin operations and
 - `npm run typecheck` — TypeScript, no emit
 - `npm run format` — format with Prettier
 - `npm run format:check` — verify formatting
-- `npm run seed:admin -- you@example.com` — promote an email to the Admins group
+- `npm run seed:admin -- you@example.com --super` — promote an email to the SuperAdmins group
 
 ## Load Testing
 

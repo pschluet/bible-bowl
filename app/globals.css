@@ -5,6 +5,13 @@
   --font-mono: var(--font-geist-mono);
 }
 
+@keyframes ping-slow {
+  75%, 100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}
+
 @layer base {
   *,
   *::before,

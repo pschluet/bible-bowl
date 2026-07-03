@@ -4,9 +4,6 @@
  * without pulling in `@aws-amplify/backend` (CDK) into the browser bundle.
  */
 
-/** The fixed DynamoDB record ID for the GameState singleton. */
-export const GAME_STATE_ID = 'SINGLETON';
-
 /** Valid point values a team can receive for a single question. */
 export const POINT_OPTIONS = [0, 1, 2, 3] as const;
 
@@ -27,6 +24,40 @@ export const GROUP_LABELS: Record<GroupType, string> = {
  * (teamId, questionNumber) fail atomically — no duplicate records possible.
  */
 export const scoreId = (teamId: string, questionNumber: number) => `${teamId}#${questionNumber}`;
+
+/**
+ * Reserved URL segments that must not be used as game slugs, since they
+ * correspond to top-level app routes.
+ */
+const RESERVED_SLUGS = new Set(['login', 'scan', 'scorekeeper', 'admin', 'api', 'g']);
+
+/**
+ * Normalize a raw slug input: lowercase, replace spaces with hyphens,
+ * strip characters that aren't alphanumeric or hyphens.
+ */
+export function normalizeSlug(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/**
+ * Returns an error message if the slug is invalid or reserved, or null if valid.
+ */
+export function validateSlug(slug: string): string | null {
+  if (!slug) return 'Game code is required.';
+  if (slug.length < 2) return 'Game code must be at least 2 characters.';
+  if (slug.length > 64) return 'Game code must be 64 characters or fewer.';
+  if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(slug) && !/^[a-z0-9]$/.test(slug)) {
+    return 'Game code must start and end with a letter or number, and contain only letters, numbers, and hyphens.';
+  }
+  if (RESERVED_SLUGS.has(slug))
+    return `"${slug}" is a reserved word and cannot be used as a game code.`;
+  return null;
+}
 
 /**
  * Fetch ALL pages of an Amplify list query, working around the 100-item default
