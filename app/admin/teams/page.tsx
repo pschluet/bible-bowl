@@ -83,11 +83,7 @@ function SortableTeamRow({
   };
 
   return (
-    <li
-      ref={setNodeRef}
-      style={style}
-      className="flex flex-wrap items-center gap-3 px-4 py-3"
-    >
+    <li ref={setNodeRef} style={style} className="flex flex-wrap items-center gap-3 px-4 py-3">
       {/* Drag handle */}
       <button
         type="button"
@@ -250,9 +246,7 @@ export default function AdminTeamsPage() {
     // Optimistic: assign each team its new displayOrder (= array index)
     setTeams((cur) => {
       const orderMap = new Map(reordered.map((t, i) => [t.id, i]));
-      return cur.map((t) =>
-        orderMap.has(t.id) ? { ...t, displayOrder: orderMap.get(t.id)! } : t
-      );
+      return cur.map((t) => (orderMap.has(t.id) ? { ...t, displayOrder: orderMap.get(t.id)! } : t));
     });
 
     setError(null);
@@ -321,7 +315,10 @@ export default function AdminTeamsPage() {
         </div>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={sortedTeams.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+          <SortableContext
+            items={sortedTeams.map((t) => t.id)}
+            strategy={verticalListSortingStrategy}
+          >
             <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
               {sortedTeams.map((team) => (
                 <SortableTeamRow

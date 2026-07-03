@@ -13,11 +13,7 @@ type ScoreEntryProps = {
   existingScore: number | null;
 };
 
-export default function ScoreEntry({
-  team,
-  currentQuestion,
-  existingScore,
-}: ScoreEntryProps) {
+export default function ScoreEntry({ team, currentQuestion, existingScore }: ScoreEntryProps) {
   const [submitting, setSubmitting] = useState(false);
   const [pendingPoints, setPendingPoints] = useState<number | null>(null);
   const [submittedScore, setSubmittedScore] = useState<number | null>(existingScore);
@@ -86,11 +82,11 @@ export default function ScoreEntry({
           {submittedScore !== null ? (
             /* Confirmation card */
             <div className="rounded-2xl border border-green-200 bg-green-50 p-8 text-center shadow-sm">
-              <p className="font-bold text-green-700" style={{ fontSize: '3.75rem' }}>{submittedScore}</p>
-              <p className="mt-2 text-xl font-semibold text-green-700">Score submitted ✓</p>
-              <p className="mt-1 text-base text-gray-500">
-                Recorded for Q{currentQuestion}
+              <p className="font-bold text-green-700" style={{ fontSize: '3.75rem' }}>
+                {submittedScore}
               </p>
+              <p className="mt-2 text-xl font-semibold text-green-700">Score submitted ✓</p>
+              <p className="mt-1 text-base text-gray-500">Recorded for Q{currentQuestion}</p>
             </div>
           ) : (
             <ScoreButtonGrid

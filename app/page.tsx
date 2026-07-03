@@ -171,7 +171,7 @@ export default function ViewerPage() {
         <p className="mt-1 text-sm text-gray-500">
           {currentQuestion === null ? 'Waiting to start' : `Question ${currentQuestion}`}
         </p>
-        {(isAdmin || isScorekeeper) ? (
+        {isAdmin || isScorekeeper ? (
           <nav className="mt-2 flex justify-center gap-4">
             {isAdmin && (
               <Link

@@ -77,10 +77,7 @@ export default function AdminNav({ adminEmail }: { adminEmail: string }) {
               {link.label}
             </Link>
           ))}
-          <Link
-            href="/"
-            className={`rounded-md px-3 py-2 text-sm ${linkClasses(false)}`}
-          >
+          <Link href="/" className={`rounded-md px-3 py-2 text-sm ${linkClasses(false)}`}>
             Leaderboard
           </Link>
         </nav>

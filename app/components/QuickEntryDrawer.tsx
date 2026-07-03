@@ -180,9 +180,7 @@ export default function QuickEntryDrawer({
           {selectedTeam && currentQuestion !== null ? (
             <ScoreButtonGrid
               onSelect={(pts) => onEnterScore(selectedTeam.id, pts)}
-              activeValue={
-                recentEntry?.teamId === selectedTeam.id ? recentEntry.points : null
-              }
+              activeValue={recentEntry?.teamId === selectedTeam.id ? recentEntry.points : null}
             />
           ) : (
             <p className="text-center text-gray-500">

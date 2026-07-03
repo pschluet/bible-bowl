@@ -38,7 +38,9 @@ export default function ScoreButtonGrid({
             type="button"
             aria-disabled={disabled}
             aria-busy={isPending}
-            onClick={() => { if (!disabled) onSelect(points); }}
+            onClick={() => {
+              if (!disabled) onSelect(points);
+            }}
             className={[
               'flex aspect-square items-center justify-center rounded-2xl border-2 font-bold shadow-sm transition-all',
               isPending || isActive

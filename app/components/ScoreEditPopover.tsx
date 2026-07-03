@@ -29,7 +29,10 @@ export default function ScoreEditPopover({
   onClose,
 }: ScoreEditPopoverProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const [style, setStyle] = useState<React.CSSProperties>({ visibility: 'hidden', position: 'fixed' });
+  const [style, setStyle] = useState<React.CSSProperties>({
+    visibility: 'hidden',
+    position: 'fixed',
+  });
   const rafRef = useRef<number | null>(null);
 
   const reposition = useCallback(() => {

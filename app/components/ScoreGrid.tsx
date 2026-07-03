@@ -93,9 +93,7 @@ export default function ScoreGrid({
   }
 
   const editingExisting =
-    editing !== null
-      ? (scoreMap.get(editing.teamId)?.get(editing.q) ?? null)
-      : null;
+    editing !== null ? (scoreMap.get(editing.teamId)?.get(editing.q) ?? null) : null;
 
   if (teams.length === 0) {
     return (
@@ -233,25 +231,26 @@ export default function ScoreGrid({
         </tbody>
       </table>
 
-      {editing !== null && (() => {
-        const editTeam = teams.find((t) => t.id === editing.teamId);
-        if (!editTeam) return null;
-        return (
-          <ScoreEditPopover
-            anchorEl={editing.anchorEl}
-            teamName={editTeam.name}
-            groupType={editTeam.groupType}
-            questionNumber={editing.q}
-            existingPoints={editingExisting?.points ?? null}
-            onSelect={(pts) => handleSelect(editing.teamId, editing.q, pts)}
-            onClear={() => {
-              if (editingExisting && onScoreDelete) onScoreDelete(editingExisting.id);
-              setEditing(null);
-            }}
-            onClose={() => setEditing(null)}
-          />
-        );
-      })()}
+      {editing !== null &&
+        (() => {
+          const editTeam = teams.find((t) => t.id === editing.teamId);
+          if (!editTeam) return null;
+          return (
+            <ScoreEditPopover
+              anchorEl={editing.anchorEl}
+              teamName={editTeam.name}
+              groupType={editTeam.groupType}
+              questionNumber={editing.q}
+              existingPoints={editingExisting?.points ?? null}
+              onSelect={(pts) => handleSelect(editing.teamId, editing.q, pts)}
+              onClear={() => {
+                if (editingExisting && onScoreDelete) onScoreDelete(editingExisting.id);
+                setEditing(null);
+              }}
+              onClose={() => setEditing(null)}
+            />
+          );
+        })()}
     </div>
   );
 }

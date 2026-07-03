@@ -81,8 +81,7 @@ export default function ScanClient({ token }: { token: string | null }) {
           const existing = await fetchAuthSession({ forceRefresh: false });
           if (existing.tokens?.accessToken) {
             const groups =
-              (existing.tokens.accessToken.payload['cognito:groups'] as string[] | undefined) ??
-              [];
+              (existing.tokens.accessToken.payload['cognito:groups'] as string[] | undefined) ?? [];
             if (groups.includes('Scorekeepers')) {
               setStage('redirecting');
               router.replace('/scorekeeper');
