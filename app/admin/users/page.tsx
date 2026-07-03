@@ -39,6 +39,9 @@ export default function AdminUsersPage() {
   const [showPrintGrid, setShowPrintGrid] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
+  // ── Per-team regeneration ──────────────────────────────────────────────────
+  const [regeneratingTeam, setRegeneratingTeam] = useState<string | null>(null);
+
   // ── GameState (scoringOpen toggle) ────────────────────────────────────────
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [togglingEntry, setTogglingEntry] = useState(false);
@@ -113,6 +116,11 @@ export default function AdminUsersPage() {
   // so the admin sees "Used" badges appear as scorekeepers onboard without
   // reloading. Depends on `teams` for the team-name join; re-subscribes if
   // teams change.
+  //
+  // Token selection is per-team (not per-batch) so that a single-team
+  // regeneration — which creates a one-token batch with a later expiresAt —
+  // renders correctly alongside the rest of the teams' tokens instead of
+  // collapsing the list to just that one team.
   useEffect(() => {
     if (teams.length === 0) return; // wait until teams have loaded
 
@@ -124,50 +132,43 @@ export default function AdminUsersPage() {
           return;
         }
 
-        // Find the most recently generated batch (latest expiresAt across the batch)
-        const byBatch = new Map<string, typeof items>();
+        // Group all tokens by teamId, then pick the best one per team:
+        // • prefer the UNUSED token (consume-before-create means at most one)
+        // • fall back to the most-recent CONSUMED token so "Used" badges still show
+        const byTeam = new Map<string, typeof items[number]>();
         for (const item of items) {
-          const key = item.batchId ?? '__none__';
-          if (!byBatch.has(key)) byBatch.set(key, []);
-          byBatch.get(key)!.push(item);
-        }
-
-        let latestBatchKey = '__none__';
-        let latestExpiry = '';
-        for (const [batchKey, batchItems] of byBatch) {
-          const maxExpiry = batchItems.reduce(
-            (best, t) => (t.expiresAt && t.expiresAt > best ? t.expiresAt : best),
-            ''
-          );
-          if (maxExpiry > latestExpiry) {
-            latestExpiry = maxExpiry;
-            latestBatchKey = batchKey;
+          const existing = byTeam.get(item.teamId);
+          if (!existing) {
+            byTeam.set(item.teamId, item);
+            continue;
+          }
+          // UNUSED always wins over CONSUMED
+          if (item.status === 'UNUSED' && existing.status !== 'UNUSED') {
+            byTeam.set(item.teamId, item);
+            continue;
+          }
+          // Among same-status tokens, prefer the more recent one
+          if (item.status === existing.status) {
+            const itemDate = item.expiresAt ?? item.consumedAt ?? '';
+            const existingDate = existing.expiresAt ?? existing.consumedAt ?? '';
+            if (itemDate > existingDate) byTeam.set(item.teamId, item);
           }
         }
 
-        const latestBatch = byBatch.get(latestBatchKey) ?? [];
-
         // Join against the sorted teams array to produce QrToken[]
-        const mapped: QrToken[] = latestBatch
-          .flatMap((t): QrToken[] => {
-            const team = teams.find((tm) => tm.id === t.teamId);
-            if (!team) return [];
-            return [
-              {
-                tokenId: t.tokenId,
-                teamId: t.teamId,
-                teamName: team.name,
-                groupType: team.groupType ?? null,
-                status: (t.status ?? 'UNUSED') as 'UNUSED' | 'CONSUMED',
-              },
-            ];
-          })
-          // Preserve the same order as the sorted teams list
-          .sort((a, b) => {
-            const ai = teams.findIndex((t) => t.id === a.teamId);
-            const bi = teams.findIndex((t) => t.id === b.teamId);
-            return ai - bi;
-          });
+        const mapped: QrToken[] = teams.flatMap((team): QrToken[] => {
+          const t = byTeam.get(team.id);
+          if (!t) return [];
+          return [
+            {
+              tokenId: t.tokenId,
+              teamId: t.teamId,
+              teamName: team.name,
+              groupType: team.groupType ?? null,
+              status: (t.status ?? 'UNUSED') as 'UNUSED' | 'CONSUMED',
+            },
+          ];
+        });
 
         setTokens(mapped);
       }
@@ -191,6 +192,29 @@ export default function AdminUsersPage() {
       setGenerateError(err instanceof Error ? err.message : 'Failed to generate QR codes.');
     } finally {
       setGenerating(false);
+    }
+  }
+
+  // ── Single-team QR regeneration ────────────────────────────────────────────
+  async function handleRegenerateTeam(teamId: string) {
+    setRegeneratingTeam(teamId);
+    setGenerateError(null);
+    try {
+      const res = await fetch('/api/scorekeeper/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teamId }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error ?? 'Failed to regenerate QR code.');
+      }
+      // The new token appears via the live subscription — no manual setTokens needed.
+      await loadUsers();
+    } catch (err) {
+      setGenerateError(err instanceof Error ? err.message : 'Failed to regenerate QR code.');
+    } finally {
+      setRegeneratingTeam(null);
     }
   }
 
@@ -402,7 +426,7 @@ export default function AdminUsersPage() {
             {tokens.map((token, idx) => (
               <li
                 key={token.tokenId}
-                className="flex items-center justify-between gap-3 px-4 py-2.5"
+                className="flex flex-wrap items-center gap-3 px-4 py-2.5"
               >
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-gray-900">{token.teamName}</p>
@@ -417,6 +441,17 @@ export default function AdminUsersPage() {
                 >
                   {token.status === 'UNUSED' ? 'Available' : 'Used'}
                 </span>
+
+                {/* Per-team regenerate — fires immediately, no confirm */}
+                <button
+                  type="button"
+                  onClick={() => void handleRegenerateTeam(token.teamId)}
+                  disabled={regeneratingTeam === token.teamId}
+                  className="shrink-0 rounded-md border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                >
+                  {regeneratingTeam === token.teamId ? 'Regenerating…' : 'Regenerate'}
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setQrDisplayIndex(idx)}
