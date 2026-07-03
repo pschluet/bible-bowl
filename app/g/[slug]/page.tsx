@@ -198,6 +198,14 @@ export default function GameLeaderboardPage({ params }: Props) {
 
   return (
     <main className="flex min-h-full flex-col">
+      {/* Backdrop — must live outside any CSS-transform ancestor so fixed positioning covers the full viewport */}
+      {menuOpen && (
+        <div
+          className="fixed inset-0 z-40"
+          aria-hidden="true"
+          onClick={() => setMenuOpen(false)}
+        />
+      )}
       <header className="relative border-b border-gray-200 bg-white px-4 py-4 text-center">
         <h1 className="text-lg font-bold text-indigo-700 sm:text-3xl">
           {game ? game.title : '🏆 Bible Bowl Live Scores'}
@@ -212,80 +220,81 @@ export default function GameLeaderboardPage({ params }: Props) {
           {currentQuestion === null ? 'Waiting to start' : `Question ${currentQuestion}`}
         </p>
         {/* Navigation menu — top-right of header */}
-        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+        <div className="absolute right-3 top-1/2 z-50 -translate-y-1/2">
           <button
             type="button"
             onClick={() => setMenuOpen((open) => !open)}
-            aria-label="Open menu"
+            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
             aria-expanded={menuOpen}
             className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-gray-100"
           >
+            {/* Three bars that morph into an X when open */}
             <span className="flex flex-col gap-1">
-              <span className="h-0.5 w-5 rounded-full bg-indigo-600" />
-              <span className="h-0.5 w-5 rounded-full bg-indigo-600" />
-              <span className="h-0.5 w-5 rounded-full bg-indigo-600" />
+              <span
+                className={`h-0.5 w-5 rounded-full bg-indigo-600 transition-transform duration-300 ease-in-out origin-center${menuOpen ? ' translate-y-[6px] rotate-45' : ''}`}
+              />
+              <span
+                className={`h-0.5 w-5 rounded-full bg-indigo-600 transition-[transform,opacity] duration-200 ease-in-out origin-center${menuOpen ? ' opacity-0' : ''}`}
+              />
+              <span
+                className={`h-0.5 w-5 rounded-full bg-indigo-600 transition-transform duration-300 ease-in-out origin-center${menuOpen ? ' -translate-y-[6px] -rotate-45' : ''}`}
+              />
             </span>
           </button>
 
-          {menuOpen && (
-            <>
-              {/* Backdrop — transparent, full-screen, click to dismiss */}
-              <div
-                className="fixed inset-0 z-40"
-                aria-hidden="true"
+          {/* Dropdown — always mounted; grid-rows animation expands/contracts height */}
+          <nav
+            className={`absolute right-0 z-50 mt-2 grid w-48 transition-[grid-template-rows,opacity] duration-300 ease-in-out${menuOpen ? ' grid-rows-[1fr] opacity-100' : ' grid-rows-[0fr] opacity-0 pointer-events-none'}`}
+          >
+            <div className="flex flex-col overflow-hidden rounded-md border border-gray-200 bg-white py-1 text-left shadow-lg">
+              <Link
+                href="/"
                 onClick={() => setMenuOpen(false)}
-              />
-
-              <nav className="absolute right-0 z-50 mt-2 flex w-48 flex-col overflow-hidden rounded-md border border-gray-200 bg-white py-1 text-left shadow-lg">
+                className="block w-full px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-gray-100"
+              >
+                All Games
+              </Link>
+              {isAdmin && (
                 <Link
-                  href="/"
+                  href="/admin/games"
                   onClick={() => setMenuOpen(false)}
                   className="block w-full px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-gray-100"
                 >
-                  All Games
+                  Admin
                 </Link>
-                {isAdmin && (
-                  <Link
-                    href="/admin/games"
-                    onClick={() => setMenuOpen(false)}
-                    className="block w-full px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-gray-100"
-                  >
-                    Admin
-                  </Link>
-                )}
-                {isScorekeeper && (
-                  <Link
-                    href="/scorekeeper"
-                    onClick={() => setMenuOpen(false)}
-                    className="block w-full px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-gray-100"
-                  >
-                    Scorekeeper
-                  </Link>
-                )}
-                {!isAdmin && !isScorekeeper && (
-                  <Link
-                    href="/login"
-                    onClick={() => setMenuOpen(false)}
-                    className="block w-full px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-gray-100"
-                  >
-                    Admin Login
-                  </Link>
-                )}
-                {siteUrl && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setQrExpanded(true);
-                      setMenuOpen(false);
-                    }}
-                    className="block w-full px-4 py-2 text-left text-sm font-medium text-indigo-600 hover:bg-gray-100"
-                  >
-                    Show QR
-                  </button>
-                )}
-              </nav>
-            </>
-          )}
+              )}
+              {isScorekeeper && (
+                <Link
+                  href="/scorekeeper"
+                  onClick={() => setMenuOpen(false)}
+                  className="block w-full px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-gray-100"
+                >
+                  Scorekeeper
+                </Link>
+              )}
+              {!isAdmin && !isScorekeeper && (
+                <Link
+                  href="/login"
+                  onClick={() => setMenuOpen(false)}
+                  className="block w-full px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-gray-100"
+                >
+                  Admin Login
+                </Link>
+              )}
+              {siteUrl && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQrExpanded(true);
+                    setMenuOpen(false);
+                  }}
+                  className="block w-full px-4 py-2 text-left text-sm font-medium text-indigo-600 hover:bg-gray-100"
+                >
+                  Show QR
+                </button>
+              )}
+            </div>
+          </nav>
         </div>
       </header>
 
