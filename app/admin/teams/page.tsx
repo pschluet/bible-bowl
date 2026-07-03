@@ -2,6 +2,23 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
+import {
+  DndContext,
+  DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import type { Schema } from '@/amplify/data/resource';
 import { compareTeamOrder, GROUP_LABELS, GROUP_TYPES, type GroupType } from '@/app/lib/constants';
 import { subscribeLive } from '@/app/lib/liveQuery';
@@ -10,6 +27,135 @@ type Team = Schema['Team']['type'];
 
 const client = generateClient<Schema>({ authMode: 'userPool' });
 
+// ── Drag handle icon ────────────────────────────────────────────────────────
+function GripIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <circle cx="5" cy="4" r="1.25" />
+      <circle cx="11" cy="4" r="1.25" />
+      <circle cx="5" cy="8" r="1.25" />
+      <circle cx="11" cy="8" r="1.25" />
+      <circle cx="5" cy="12" r="1.25" />
+      <circle cx="11" cy="12" r="1.25" />
+    </svg>
+  );
+}
+
+// ── Sortable row ────────────────────────────────────────────────────────────
+interface RowProps {
+  team: Team;
+  editingId: string | null;
+  editName: string;
+  onEditStart: (team: Team) => void;
+  onEditChange: (v: string) => void;
+  onEditSave: (id: string) => void;
+  onEditCancel: () => void;
+  onGroupChange: (id: string, g: GroupType) => void;
+  onDelete: (team: Team) => void;
+}
+
+function SortableTeamRow({
+  team,
+  editingId,
+  editName,
+  onEditStart,
+  onEditChange,
+  onEditSave,
+  onEditCancel,
+  onGroupChange,
+  onDelete,
+}: RowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: team.id,
+  });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : undefined,
+  };
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      className="flex flex-wrap items-center gap-3 px-4 py-3"
+    >
+      {/* Drag handle */}
+      <button
+        type="button"
+        {...listeners}
+        {...attributes}
+        className="cursor-grab touch-none text-gray-400 hover:text-gray-600 active:cursor-grabbing"
+        aria-label={`Drag to reorder ${team.name}`}
+      >
+        <GripIcon />
+      </button>
+
+      <div className="min-w-0 flex-1">
+        {editingId === team.id ? (
+          <input
+            type="text"
+            autoFocus
+            value={editName}
+            onChange={(e) => onEditChange(e.target.value)}
+            onBlur={() => onEditSave(team.id)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onEditSave(team.id);
+              if (e.key === 'Escape') onEditCancel();
+            }}
+            className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none"
+          />
+        ) : (
+          <p className="truncate font-medium text-gray-900">{team.name}</p>
+        )}
+      </div>
+
+      {/* Group selector */}
+      <select
+        value={team.groupType ?? ''}
+        onChange={(e) => {
+          if (e.target.value) onGroupChange(team.id, e.target.value as GroupType);
+        }}
+        className="rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
+        aria-label={`Group for ${team.name}`}
+      >
+        <option value="">— group —</option>
+        {GROUP_TYPES.map((g) => (
+          <option key={g} value={g}>
+            {GROUP_LABELS[g]}
+          </option>
+        ))}
+      </select>
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onEditStart(team)}
+          className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          onClick={() => onDelete(team)}
+          className="text-sm font-medium text-red-600 hover:text-red-800"
+        >
+          Delete
+        </button>
+      </div>
+    </li>
+  );
+}
+
+// ── Page ────────────────────────────────────────────────────────────────────
 export default function AdminTeamsPage() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,8 +168,12 @@ export default function AdminTeamsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
 
-  // Sorted teams derived from the live stream
   const sortedTeams = useMemo(() => [...teams].sort(compareTeamOrder), [teams]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
   useEffect(() => {
     return subscribeLive(
@@ -47,7 +197,6 @@ export default function AdminTeamsPage() {
         { authMode: 'userPool' }
       );
       setNewName('');
-      // Stream delivers the new team — no reload needed
     } catch {
       setError('Failed to add team.');
     } finally {
@@ -62,7 +211,6 @@ export default function AdminTeamsPage() {
     setError(null);
     try {
       await client.models.Team.update({ id, name }, { authMode: 'userPool' });
-      // Stream delivers the update — no reload needed
     } catch {
       setError('Failed to update team.');
     }
@@ -72,7 +220,6 @@ export default function AdminTeamsPage() {
     setError(null);
     try {
       await client.models.Team.update({ id, groupType }, { authMode: 'userPool' });
-      // Stream delivers the update — no reload needed
     } catch {
       setError('Failed to update group.');
     }
@@ -83,48 +230,43 @@ export default function AdminTeamsPage() {
     setError(null);
     try {
       await client.models.Team.delete({ id: team.id }, { authMode: 'userPool' });
-      // Stream delivers the delete — no reload needed
     } catch {
       setError('Failed to delete team.');
     }
   }
 
-  async function handleMove(index: number, direction: 'up' | 'down') {
-    const swapIndex = direction === 'up' ? index - 1 : index + 1;
-    if (swapIndex < 0 || swapIndex >= sortedTeams.length) return;
+  async function handleDragEnd({ active, over }: DragEndEvent) {
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = sortedTeams.findIndex((t) => t.id === active.id);
+    const newIndex = sortedTeams.findIndex((t) => t.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = arrayMove(sortedTeams, oldIndex, newIndex);
+
+    // Snapshot for revert
+    const previous = teams;
+
+    // Optimistic: assign each team its new displayOrder (= array index)
+    setTeams((cur) => {
+      const orderMap = new Map(reordered.map((t, i) => [t.id, i]));
+      return cur.map((t) =>
+        orderMap.has(t.id) ? { ...t, displayOrder: orderMap.get(t.id)! } : t
+      );
+    });
+
     setError(null);
-
-    const teamA = sortedTeams[index];
-    const teamB = sortedTeams[swapIndex];
-
-    // Optimistic: swap display orders in local state so the UI updates instantly
-    setTeams((cur) =>
-      cur.map((t) => {
-        if (t.id === teamA.id) return { ...t, displayOrder: swapIndex };
-        if (t.id === teamB.id) return { ...t, displayOrder: index };
-        return t;
-      })
-    );
-
     try {
-      await Promise.all([
-        client.models.Team.update(
-          { id: teamA.id, displayOrder: swapIndex },
-          { authMode: 'userPool' }
-        ),
-        client.models.Team.update({ id: teamB.id, displayOrder: index }, { authMode: 'userPool' }),
-      ]);
-      // Stream delivers confirmed updates — no reload needed
+      // Only write teams whose displayOrder actually changed
+      const updates = reordered.flatMap((t, i) =>
+        t.displayOrder !== i
+          ? [client.models.Team.update({ id: t.id, displayOrder: i }, { authMode: 'userPool' })]
+          : []
+      );
+      await Promise.all(updates);
     } catch {
       setError('Failed to reorder teams.');
-      // Revert optimistic state
-      setTeams((cur) =>
-        cur.map((t) => {
-          if (t.id === teamA.id) return { ...t, displayOrder: index };
-          if (t.id === teamB.id) return { ...t, displayOrder: swapIndex };
-          return t;
-        })
-      );
+      setTeams(previous);
     }
   }
 
@@ -178,89 +320,29 @@ export default function AdminTeamsPage() {
           No teams yet.
         </div>
       ) : (
-        <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
-          {sortedTeams.map((team, index) => (
-            <li key={team.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-              {/* Up/down reorder buttons */}
-              <div className="flex flex-col">
-                <button
-                  type="button"
-                  onClick={() => void handleMove(index, 'up')}
-                  disabled={index === 0}
-                  className="text-gray-400 hover:text-gray-700 disabled:invisible"
-                  aria-label="Move up"
-                >
-                  ▲
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleMove(index, 'down')}
-                  disabled={index === sortedTeams.length - 1}
-                  className="text-gray-400 hover:text-gray-700 disabled:invisible"
-                  aria-label="Move down"
-                >
-                  ▼
-                </button>
-              </div>
-
-              <div className="min-w-0 flex-1">
-                {editingId === team.id ? (
-                  <input
-                    type="text"
-                    autoFocus
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    onBlur={() => handleSaveEdit(team.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleSaveEdit(team.id);
-                      if (e.key === 'Escape') setEditingId(null);
-                    }}
-                    className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none"
-                  />
-                ) : (
-                  <p className="truncate font-medium text-gray-900">{team.name}</p>
-                )}
-              </div>
-
-              {/* Group selector */}
-              <select
-                value={team.groupType ?? ''}
-                onChange={(e) => {
-                  if (e.target.value) void handleGroupChange(team.id, e.target.value as GroupType);
-                }}
-                className="rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
-                aria-label={`Group for ${team.name}`}
-              >
-                <option value="">— group —</option>
-                {GROUP_TYPES.map((g) => (
-                  <option key={g} value={g}>
-                    {GROUP_LABELS[g]}
-                  </option>
-                ))}
-              </select>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingId(team.id);
-                    setEditName(team.name);
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={sortedTeams.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+            <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
+              {sortedTeams.map((team) => (
+                <SortableTeamRow
+                  key={team.id}
+                  team={team}
+                  editingId={editingId}
+                  editName={editName}
+                  onEditStart={(t) => {
+                    setEditingId(t.id);
+                    setEditName(t.name);
                   }}
-                  className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
-                >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDelete(team)}
-                  className="text-sm font-medium text-red-600 hover:text-red-800"
-                >
-                  Delete
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+                  onEditChange={setEditName}
+                  onEditSave={(id) => void handleSaveEdit(id)}
+                  onEditCancel={() => setEditingId(null)}
+                  onGroupChange={(id, g) => void handleGroupChange(id, g)}
+                  onDelete={(t) => void handleDelete(t)}
+                />
+              ))}
+            </ul>
+          </SortableContext>
+        </DndContext>
       )}
     </div>
   );
