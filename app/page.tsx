@@ -13,14 +13,13 @@ import Leaderboard, {
 } from '@/app/components/Leaderboard';
 
 const FAVORITE_KEY = 'bb_favorite';
-const SITE_URL = 'https://bible.pauldev.io/';
-
 const client = generateClient<Schema>();
 
 export default function ViewerPage() {
   const [favoriteTeamIds, setFavoriteTeamIds] = useState<Set<string>>(new Set());
   const [groups, setGroups] = useState<string[]>([]);
   const [qrExpanded, setQrExpanded] = useState(false);
+  const [siteUrl, setSiteUrl] = useState('');
   const [teamsSynced, setTeamsSynced] = useState(false);
   const [scoresSynced, setScoresSynced] = useState(false);
   const loading = !teamsSynced || !scoresSynced;
@@ -50,6 +49,11 @@ export default function ViewerPage() {
     }
     // Legacy: a bare team-id string.
     setFavoriteTeamIds(new Set([raw]));
+  }, []);
+
+  // Derive the site URL from the browser origin after mount (avoids SSR/hydration mismatch).
+  useEffect(() => {
+    setSiteUrl(window.location.origin);
   }, []);
 
   // Close full-screen QR on Escape
@@ -198,14 +202,16 @@ export default function ViewerPage() {
         )}
 
         {/* QR thumbnail — top-right of header */}
-        <button
-          type="button"
-          onClick={() => setQrExpanded(true)}
-          aria-label="Show full-screen QR code"
-          className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 hover:bg-gray-100"
-        >
-          <QRCodeSVG value={SITE_URL} size={40} />
-        </button>
+        {siteUrl && (
+          <button
+            type="button"
+            onClick={() => setQrExpanded(true)}
+            aria-label="Show full-screen QR code"
+            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 hover:bg-gray-100"
+          >
+            <QRCodeSVG value={siteUrl} size={40} />
+          </button>
+        )}
       </header>
 
       {/* Full-screen QR overlay */}
@@ -217,13 +223,13 @@ export default function ViewerPage() {
           onClick={() => setQrExpanded(false)}
         >
           <QRCodeSVG
-            value={SITE_URL}
+            value={siteUrl}
             size={500}
             bgColor="#000000"
             fgColor="#ffffff"
             className="h-auto w-full max-w-[500px]"
           />
-          <p className="text-lg font-medium text-white">{SITE_URL}</p>
+          <p className="text-lg font-medium text-white">{siteUrl}</p>
         </div>
       )}
 
