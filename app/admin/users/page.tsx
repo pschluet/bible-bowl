@@ -50,6 +50,9 @@ export default function SuperAdminUsersPage() {
   }, []);
 
   useEffect(() => {
+    // State updates happen only after awaiting async calls — valid fetch-on-mount,
+    // not a synchronous cascading render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadUsers();
     void getCurrentUser()
       .then(({ userId }) => setCurrentSub(userId))

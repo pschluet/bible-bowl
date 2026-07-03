@@ -251,7 +251,9 @@ export default function GameLeaderboardPage({ params }: Props) {
           className="fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-6 bg-black p-6"
           onClick={() => setQrExpanded(false)}
         >
-          <p className="text-7xl font-bold text-white">Scan for Live Scores</p>
+          <p className="text-center text-4xl font-bold text-white sm:text-7xl">
+            Scan for Live Scores
+          </p>
           <QRCodeSVG
             value={siteUrl}
             size={500}

@@ -21,7 +21,7 @@ export default function AdminGamesPage() {
 
   // Create form
   const [newTitle, setNewTitle] = useState('');
-  const [newSlugRaw, setNewSlugRaw] = useState('');
+  const [editedSlug, setEditedSlug] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -34,12 +34,8 @@ export default function AdminGamesPage() {
   // unless the user has manually edited the slug field.
   const [slugEdited, setSlugEdited] = useState(false);
   const suggestedSlug = useMemo(() => normalizeSlug(newTitle), [newTitle]);
-
-  useEffect(() => {
-    if (!slugEdited) {
-      setNewSlugRaw(suggestedSlug);
-    }
-  }, [suggestedSlug, slugEdited]);
+  // Derived during render — no effect needed.
+  const newSlugRaw = slugEdited ? editedSlug : suggestedSlug;
 
   // Load current user's sub and groups; fetch owner email map if super admin
   useEffect(() => {
@@ -119,7 +115,7 @@ export default function AdminGamesPage() {
       }
       // Game will appear via subscription. Reset form.
       setNewTitle('');
-      setNewSlugRaw('');
+      setEditedSlug('');
       setSlugEdited(false);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'Failed to create game.');
@@ -170,7 +166,6 @@ export default function AdminGamesPage() {
               value={newTitle}
               onChange={(e) => {
                 setNewTitle(e.target.value);
-                if (!slugEdited) setNewSlugRaw(normalizeSlug(e.target.value));
               }}
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
             />
@@ -190,10 +185,10 @@ export default function AdminGamesPage() {
               placeholder="e.g. faith-2026"
               value={newSlugRaw}
               onChange={(e) => {
-                setNewSlugRaw(e.target.value);
+                setEditedSlug(e.target.value);
                 setSlugEdited(true);
               }}
-              onBlur={() => setNewSlugRaw(normalizeSlug(newSlugRaw))}
+              onBlur={() => setEditedSlug(normalizeSlug(newSlugRaw))}
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:outline-none"
             />
             <p className="mt-1 text-xs text-gray-400">

@@ -63,9 +63,12 @@ export default function ScorekeeperPage() {
   const gameId = myTeam?.gameId ?? null;
   useEffect(() => {
     if (!gameId) {
-      // No team yet — mark synced so we don't block forever
+      // Resetting mirrored subscription state when there is no active subscription —
+      // not a synchronous cascading render.
+      /* eslint-disable react-hooks/set-state-in-effect */
       setGameSynced(true);
       setGameItems([]);
+      /* eslint-enable react-hooks/set-state-in-effect */
       return;
     }
     return subscribeLive(
@@ -84,6 +87,9 @@ export default function ScorekeeperPage() {
   // Score stream — filtered to myTeam, reopens when the team changes
   useEffect(() => {
     if (!myTeamId) {
+      // Resetting mirrored subscription state when there is no active subscription —
+      // not a synchronous cascading render.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTeamScores([]);
       return;
     }
