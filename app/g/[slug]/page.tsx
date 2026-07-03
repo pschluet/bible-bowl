@@ -205,7 +205,7 @@ export default function GameLeaderboardPage({ params }: Props) {
         <p className="mt-1 flex items-center justify-center gap-2 text-sm font-semibold text-gray-500 sm:text-lg">
           {currentQuestion !== null && (
             <span className="relative flex h-3 w-3 shrink-0">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-75" />
+              <span className="absolute inline-flex h-full w-full animate-[ping-slow_2.5s_cubic-bezier(0,0,0.2,1)_infinite] rounded-full bg-amber-500 opacity-75" />
               <span className="relative inline-flex h-3 w-3 rounded-full bg-amber-500" />
             </span>
           )}
