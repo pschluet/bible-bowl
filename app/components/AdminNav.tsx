@@ -49,6 +49,12 @@ export default function AdminNav({ adminEmail }: { adminEmail: string }) {
               {link.label}
             </Link>
           ))}
+          <Link
+            href="/"
+            className={`rounded-md px-3 py-1.5 text-sm whitespace-nowrap ${linkClasses(false)}`}
+          >
+            Leaderboard
+          </Link>
         </nav>
         <span className="truncate text-xs text-gray-400">Signed in as {adminEmail}</span>
       </div>
@@ -71,6 +77,12 @@ export default function AdminNav({ adminEmail }: { adminEmail: string }) {
               {link.label}
             </Link>
           ))}
+          <Link
+            href="/"
+            className={`rounded-md px-3 py-2 text-sm ${linkClasses(false)}`}
+          >
+            Leaderboard
+          </Link>
         </nav>
         <div className="border-t border-gray-200 p-3">
           <p className="mb-2 truncate text-xs text-gray-400">Signed in as {adminEmail}</p>
