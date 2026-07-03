@@ -6,7 +6,8 @@
  * the button and renders the grid clean on paper.
  */
 
-import { QRCodeCanvas } from 'qrcode.react';
+import { createPortal } from 'react-dom';
+import { QRCodeSVG } from 'qrcode.react';
 import GroupPill from '@/app/components/GroupPill';
 import type { QrToken } from '@/app/components/QrCodeDisplay';
 
@@ -18,8 +19,8 @@ interface Props {
 export default function QrCodePrintGrid({ tokens, onClose }: Props) {
   const origin = window.location.origin;
 
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-white print:static print:inset-auto print:overflow-visible print:h-auto">
+  return createPortal(
+    <div className="qr-print-root fixed inset-0 z-50 overflow-y-auto bg-white print:static print:inset-auto print:overflow-visible print:h-auto">
       {/* Print-only button bar */}
       <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-6 py-4 print:hidden">
         <h2 className="text-base font-semibold text-gray-900">QR Codes — All Teams</h2>
@@ -50,7 +51,7 @@ export default function QrCodePrintGrid({ tokens, onClose }: Props) {
               key={token.tokenId}
               className="flex flex-col items-center gap-2 rounded-xl border border-gray-200 p-3 print:break-inside-avoid print:rounded-none print:border-gray-400"
             >
-              <QRCodeCanvas value={deepLink} size={130} level="M" marginSize={1} />
+              <QRCodeSVG value={deepLink} size={130} level="M" marginSize={1} />
               <p className="text-center text-xs font-semibold text-gray-800 print:text-[10px]">
                 {token.teamName}
               </p>
@@ -59,6 +60,7 @@ export default function QrCodePrintGrid({ tokens, onClose }: Props) {
           );
         })}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
