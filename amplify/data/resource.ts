@@ -33,6 +33,7 @@ const schema = a.schema({
       allow.guest().to(['read']),
       allow.authenticated().to(['read']),
       allow.groups(['Admins']).to(['create', 'read', 'update', 'delete']),
+      allow.publicApiKey().to(['read']),
     ]),
 
   Team: a

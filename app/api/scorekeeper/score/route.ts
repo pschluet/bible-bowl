@@ -55,13 +55,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'points must be 0, 1, 2, or 3' }, { status: 400 });
   }
 
-  // userPool client: reads authorized by allow.authenticated() on GameState and Team
-  const userPoolClient = generateServerClientUsingCookies<Schema>({
-    config: outputs,
-    cookies,
-    authMode: 'userPool',
-  });
-  // apiKey client: writes authorized by allow.publicApiKey() on Score
   const apiKeyClient = generateServerClientUsingCookies<Schema>({
     config: outputs,
     cookies,
@@ -69,7 +62,7 @@ export async function POST(request: Request) {
   });
 
   // 1. Verify scoring is open
-  const { data: gameState } = await userPoolClient.models.GameState.get({ id: GAME_STATE_ID });
+  const { data: gameState } = await apiKeyClient.models.GameState.get({ id: GAME_STATE_ID });
   if (!gameState || gameState.scoringOpen === false) {
     return NextResponse.json(
       { error: 'SCORING_CLOSED', message: 'Scoring is now closed.' },
@@ -86,7 +79,7 @@ export async function POST(request: Request) {
   }
 
   // 3. Verify the scorekeeper is bound to this team (prevents cross-team writes)
-  const { data: team } = await userPoolClient.models.Team.get({ id: teamId });
+  const { data: team } = await apiKeyClient.models.Team.get({ id: teamId });
   if (!team || team.scorekeeperUserId !== session.sub) {
     return NextResponse.json(
       { error: 'TEAM_MISMATCH', message: 'You are not the scorekeeper for this team.' },
