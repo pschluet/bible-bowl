@@ -416,7 +416,6 @@ export default function AdminScoresPage() {
           scoreMap={scoreMap}
           currentQuestion={currentQuestion}
           selectedTeamId={selectedTeamId}
-          onSelect={selectTeam}
           onSelectNext={selectNext}
           onSelectPrev={selectPrev}
           onEnterScore={enterScoreAndAdvance}

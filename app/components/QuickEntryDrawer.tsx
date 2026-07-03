@@ -13,7 +13,6 @@ interface QuickEntryDrawerProps {
   scoreMap: Map<string, Map<number, Score>>;
   currentQuestion: number | null;
   selectedTeamId: string | null;
-  onSelect: (id: string) => void;
   onSelectNext: () => void;
   onSelectPrev: () => void;
   onEnterScore: (teamId: string, points: number) => void;
@@ -26,7 +25,6 @@ export default function QuickEntryDrawer({
   scoreMap,
   currentQuestion,
   selectedTeamId,
-  onSelect,
   onSelectNext,
   onSelectPrev,
   onEnterScore,

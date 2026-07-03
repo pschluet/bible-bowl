@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { Schema } from '@/amplify/data/resource';
 import GroupPill from '@/app/components/GroupPill';
 import ScoreButtonGrid from '@/app/components/ScoreButtonGrid';
@@ -17,13 +17,16 @@ export default function ScoreEntry({ team, currentQuestion, existingScore }: Sco
   const [submitting, setSubmitting] = useState(false);
   const [pendingPoints, setPendingPoints] = useState<number | null>(null);
   const [submittedScore, setSubmittedScore] = useState<number | null>(existingScore);
+  const [prevExisting, setPrevExisting] = useState(existingScore);
   const [error, setError] = useState<string | null>(null);
 
   // Re-sync local optimistic state with the live prop so that an admin delete
   // (existingScore → null) returns the scorekeeper to the entry screen.
-  useEffect(() => {
+  // Uses the "adjust state during render" pattern to avoid a setState-in-effect error.
+  if (existingScore !== prevExisting) {
+    setPrevExisting(existingScore);
     setSubmittedScore(existingScore);
-  }, [existingScore]);
+  }
 
   async function handleSelect(points: number) {
     if (currentQuestion === null || submittedScore !== null || submitting) {

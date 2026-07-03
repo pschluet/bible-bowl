@@ -12,7 +12,18 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    ".amplify/**",
   ]),
+  {
+    rules: {
+      // Allow intentional rest-sibling omission (e.g. `const { secret: _secret, ...rest } = obj`)
+      // and underscore-prefixed vars used as "deliberately unused" markers.
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { ignoreRestSiblings: true, varsIgnorePattern: "^_", argsIgnorePattern: "^_" },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;

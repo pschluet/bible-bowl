@@ -53,6 +53,7 @@ export default function ViewerPage() {
 
   // Derive the site URL from the browser origin after mount (avoids SSR/hydration mismatch).
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSiteUrl(window.location.origin);
   }, []);
 
@@ -154,7 +155,8 @@ export default function ViewerPage() {
   const onFavorite = useCallback((id: string) => {
     setFavoriteTeamIds((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       if (next.size) localStorage.setItem(FAVORITE_KEY, JSON.stringify([...next]));
       else localStorage.removeItem(FAVORITE_KEY);
       return next;
