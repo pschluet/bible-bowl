@@ -94,3 +94,29 @@ The backend CDK stack creates a scoped IAM user for Cognito admin operations and
 - `npm run format` — format with Prettier
 - `npm run format:check` — verify formatting
 - `npm run seed:admin -- you@example.com` — promote an email to the Admins group
+
+## Load Testing
+
+`scripts/test-scorekeepers.ts` simulates N concurrent scorekeepers entering scores in parallel to verify the app handles simultaneous writes correctly.
+
+**Setup:**
+
+1. Initialize the game and generate QR codes in the admin panel.
+2. Open browser DevTools → Network tab → find the `POST /api/scorekeeper/generate` response → save the full JSON body to a file (e.g. `scripts/tokens.json`).
+
+**Run:**
+
+```bash
+npx tsx scripts/test-scorekeepers.ts scripts/tokens.json [--local | --prod]
+```
+
+Omit the flag to be prompted for local (`localhost:3000`) or production (`bible.pauldev.io`).
+
+**Flow:**
+
+1. All scorekeepers authenticate in parallel (consumes each QR token — generate fresh codes for each test run).
+2. You enter the current question number.
+3. All scorekeepers submit a random score (0–3) simultaneously.
+4. After each round you can press **Enter** to advance to the next question, type a **question number** to jump to a specific one, or **q** to quit.
+
+> **Note:** Each QR token is single-use. You must regenerate QR codes between test runs.
