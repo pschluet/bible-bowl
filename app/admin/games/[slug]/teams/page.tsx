@@ -23,7 +23,9 @@ import { CSS } from '@dnd-kit/utilities';
 import type { Schema } from '@/amplify/data/resource';
 import { compareTeamOrder, GROUP_LABELS, GROUP_TYPES, type GroupType } from '@/app/lib/constants';
 import { subscribeLive } from '@/app/lib/liveQuery';
+import { mapWithConcurrency, withRetry } from '@/app/lib/concurrency';
 import Spinner from '@/app/components/Spinner';
+import BulkAddTeamsModal from '@/app/components/BulkAddTeamsModal';
 
 type Team = Schema['Team']['type'];
 
@@ -185,6 +187,8 @@ export default function AdminTeamsPage({ params }: Props) {
 
   const [deletingTeamId, setDeletingTeamId] = useState<string | null>(null);
 
+  const [bulkOpen, setBulkOpen] = useState(false);
+
   const sortedTeams = useMemo(() => [...teams].sort(compareTeamOrder), [teams]);
 
   const sensors = useSensors(
@@ -241,6 +245,25 @@ export default function AdminTeamsPage({ params }: Props) {
     } finally {
       setAdding(false);
     }
+  }
+
+  async function handleBulkAdd(newTeams: { name: string; groupType: GroupType }[]) {
+    const startOrder = teams.reduce((m, t) => Math.max(m, t.displayOrder ?? -1), -1) + 1;
+    await mapWithConcurrency(newTeams, 5, (t, idx) =>
+      withRetry(() =>
+        client.models.Team.create(
+          {
+            name: t.name,
+            gameId: slug,
+            ownerId,
+            groupType: t.groupType,
+            displayOrder: startOrder + idx,
+          },
+          { authMode: 'userPool' }
+        )
+      )
+    );
+    setBulkOpen(false);
   }
 
   async function handleSaveEdit(id: string) {
@@ -344,7 +367,18 @@ export default function AdminTeamsPage({ params }: Props) {
         >
           Add Team
         </button>
+        <button
+          type="button"
+          onClick={() => setBulkOpen(true)}
+          className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+        >
+          Bulk add
+        </button>
       </div>
+
+      {bulkOpen && (
+        <BulkAddTeamsModal onSubmit={handleBulkAdd} onClose={() => setBulkOpen(false)} />
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20">

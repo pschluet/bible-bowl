@@ -105,3 +105,69 @@ export function compareTeamOrder<T extends { displayOrder?: number | null; name:
   const bo = b.displayOrder ?? Number.MAX_SAFE_INTEGER;
   return ao - bo || a.name.localeCompare(b.name);
 }
+
+/**
+ * Normalize free-text into a GroupType enum value, or null if unrecognized.
+ * Case-insensitive; ignores spaces/dashes so "Pre-Teen", "pre teen", "PRETEEN"
+ * all resolve to "PreTeen". Used by the bulk-add-teams paste parser.
+ */
+export function normalizeGroupType(raw: string): GroupType | null {
+  const key = raw.toLowerCase().replace(/[\s-]+/g, '');
+  const map: Record<string, GroupType> = { teen: 'Teen', preteen: 'PreTeen', adult: 'Adult' };
+  return map[key] ?? null;
+}
+
+/** One parsed row from a bulk-add-teams paste, with validation result. */
+export interface ParsedTeamLine {
+  lineNumber: number;
+  name: string;
+  groupType: GroupType | null;
+  error: string | null;
+}
+
+/**
+ * Pair pasted team names (one per line) with team types (one per line) by row
+ * index. Two separate inputs are used instead of a single "name,type" line
+ * because church/team names commonly contain commas.
+ *
+ * Single-type shortcut: if `typesInput` has exactly one non-blank line, that
+ * type is applied to every name row (the common case of pasting a roster that's
+ * all one division). Rows where both the name and type are blank are skipped
+ * entirely — they aren't reported as errors.
+ */
+export function parseBulkTeams(namesInput: string, typesInput: string): ParsedTeamLine[] {
+  const nameLines = namesInput.split('\n');
+  const typeLines = typesInput.split('\n');
+  const nonBlankTypes = typeLines.map((t) => t.trim()).filter(Boolean);
+  const shortcutType = nonBlankTypes.length === 1 ? nonBlankTypes[0] : null;
+
+  const rowCount = Math.max(nameLines.length, typeLines.length);
+  const result: ParsedTeamLine[] = [];
+
+  for (let i = 0; i < rowCount; i++) {
+    const name = (nameLines[i] ?? '').trim();
+    const typeRaw = shortcutType ?? (typeLines[i] ?? '').trim();
+    if (!name && !typeRaw) continue; // fully blank row — skip silently
+
+    const lineNumber = i + 1;
+
+    if (!name) {
+      result.push({ lineNumber, name, groupType: null, error: 'missing team name' });
+      continue;
+    }
+    if (!typeRaw) {
+      result.push({ lineNumber, name, groupType: null, error: 'missing type' });
+      continue;
+    }
+
+    const groupType = normalizeGroupType(typeRaw);
+    if (!groupType) {
+      result.push({ lineNumber, name, groupType: null, error: `unknown type "${typeRaw}"` });
+      continue;
+    }
+
+    result.push({ lineNumber, name, groupType, error: null });
+  }
+
+  return result;
+}
