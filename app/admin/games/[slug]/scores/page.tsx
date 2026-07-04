@@ -76,6 +76,9 @@ export default function AdminScoresPage({ params }: Props) {
   const healedRef = useRef(false);
 
   const currentQuestion = game?.currentQuestion ?? null;
+  // Highest question ever reached — never decreases when navigating back, so
+  // later columns (and their already-entered scores) stay visible.
+  const maxQuestionReached = Math.max(currentQuestion ?? 0, game?.maxQuestionReached ?? 0);
 
   // Get user sub for stamping ownerId on new scores
   useEffect(() => {
@@ -229,7 +232,7 @@ export default function AdminScoresPage({ params }: Props) {
     setError(null);
     try {
       await client.models.Game.update(
-        { slug, currentQuestion: 1, scoringOpen: true },
+        { slug, currentQuestion: 1, maxQuestionReached: 1, scoringOpen: true },
         { authMode: 'userPool' }
       );
     } catch {
@@ -244,12 +247,33 @@ export default function AdminScoresPage({ params }: Props) {
     setBusy(true);
     setError(null);
     try {
+      const nextQuestion = currentQuestion + 1;
       await client.models.Game.update(
-        { slug, currentQuestion: currentQuestion + 1 },
+        {
+          slug,
+          currentQuestion: nextQuestion,
+          maxQuestionReached: Math.max(nextQuestion, maxQuestionReached),
+        },
         { authMode: 'userPool' }
       );
     } catch {
       setError('Failed to advance question.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handlePreviousQuestion() {
+    if (currentQuestion === null || currentQuestion <= 1) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await client.models.Game.update(
+        { slug, currentQuestion: currentQuestion - 1 },
+        { authMode: 'userPool' }
+      );
+    } catch {
+      setError('Failed to go to previous question.');
     } finally {
       setBusy(false);
     }
@@ -295,7 +319,7 @@ export default function AdminScoresPage({ params }: Props) {
 
       // Reset currentQuestion (keep the game, just reset progress)
       await client.models.Game.update(
-        { slug, currentQuestion: 1, scoringOpen: true },
+        { slug, currentQuestion: 1, maxQuestionReached: 1, scoringOpen: true },
         { authMode: 'userPool' }
       );
 
@@ -381,7 +405,7 @@ export default function AdminScoresPage({ params }: Props) {
   }, []);
 
   const handleExport = useCallback(() => {
-    const questionNumbers = Array.from({ length: currentQuestion ?? 0 }, (_, i) => i + 1);
+    const questionNumbers = Array.from({ length: maxQuestionReached }, (_, i) => i + 1);
     const header = ['Team', 'Type', ...questionNumbers.map((q) => `Q${q}`), 'Total'];
     const rows = sortedTeams.map((team) => {
       const byQuestion = scoreMap.get(team.id);
@@ -405,7 +429,7 @@ export default function AdminScoresPage({ params }: Props) {
       .join('\n');
     const filename = `bible-bowl-scores-${localTimestamp(new Date())}.csv`;
     downloadCsv(filename, csvLines);
-  }, [currentQuestion, sortedTeams, scoreMap]);
+  }, [maxQuestionReached, sortedTeams, scoreMap]);
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -441,6 +465,14 @@ export default function AdminScoresPage({ params }: Props) {
               </button>
               <button
                 type="button"
+                onClick={handlePreviousQuestion}
+                disabled={busy || currentQuestion <= 1}
+                className="rounded-md border border-indigo-600 px-4 py-2 text-sm font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
+              >
+                Previous Question
+              </button>
+              <button
+                type="button"
                 onClick={handleNextQuestion}
                 disabled={busy}
                 className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
@@ -466,6 +498,7 @@ export default function AdminScoresPage({ params }: Props) {
             teams={sortedTeams}
             scoreMap={scoreMap}
             currentQuestion={currentQuestion}
+            maxQuestion={maxQuestionReached}
             onScoreChange={saveScore}
             onScoreDelete={handleScoreDelete}
             selectedTeamId={selectedTeamId}

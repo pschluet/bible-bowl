@@ -12,6 +12,10 @@ interface ScoreGridProps {
   teams: Team[]; // already sorted
   scoreMap: Map<string, Map<number, Score>>;
   currentQuestion: number | null;
+  // Highest question reached this game — determines how many columns are
+  // shown. Independent of currentQuestion so navigating back to a previous
+  // question (via "Previous Question") doesn't hide later columns/scores.
+  maxQuestion: number;
   onScoreChange: (teamId: string, questionNumber: number, points: number) => void;
   onScoreDelete?: (existingId: string) => void;
   selectedTeamId: string | null;
@@ -204,6 +208,7 @@ export default function ScoreGrid({
   teams,
   scoreMap,
   currentQuestion,
+  maxQuestion,
   onScoreChange,
   onScoreDelete,
   selectedTeamId,
@@ -256,10 +261,9 @@ export default function ScoreGrid({
 
   // Memoized so an unrelated re-render (e.g. `editing` state changing) doesn't
   // hand ScoreRow a new array reference and defeat its memoization.
-  const questionCount = currentQuestion ?? 0;
   const questionNumbers = useMemo(
-    () => Array.from({ length: questionCount }, (_, i) => i + 1),
-    [questionCount]
+    () => Array.from({ length: maxQuestion }, (_, i) => i + 1),
+    [maxQuestion]
   );
 
   const registerRowRef = useCallback((teamId: string, el: HTMLTableRowElement | null) => {

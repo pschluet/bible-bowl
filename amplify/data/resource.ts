@@ -44,6 +44,11 @@ const schema = a.schema({
       ownerId: a.string().required(),
       // Game state (folded in from the old GameState singleton)
       currentQuestion: a.integer().required(),
+      // Highest currentQuestion ever reached this game. Only ratchets up —
+      // never decremented by "Previous Question" — so the score grid can
+      // keep showing later question columns (and their scores) even after
+      // the admin navigates back to fix an earlier one.
+      maxQuestionReached: a.integer(),
       // true = scoring open; false = closed (e.g. end game pressed).
       // Null/absent treated as open by clients for backward compat.
       scoringOpen: a.boolean(),
