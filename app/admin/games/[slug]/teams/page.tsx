@@ -21,7 +21,13 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { Schema } from '@/amplify/data/resource';
-import { compareTeamOrder, GROUP_LABELS, GROUP_TYPES, type GroupType } from '@/app/lib/constants';
+import {
+  compareTeamOrder,
+  GROUP_LABELS,
+  GROUP_TYPES,
+  listAll,
+  type GroupType,
+} from '@/app/lib/constants';
 import { subscribeLive } from '@/app/lib/liveQuery';
 import { mapWithConcurrency, withRetry } from '@/app/lib/concurrency';
 import Spinner from '@/app/components/Spinner';
@@ -189,6 +195,9 @@ export default function AdminTeamsPage({ params }: Props) {
 
   const [bulkOpen, setBulkOpen] = useState(false);
 
+  const [deletingAll, setDeletingAll] = useState(false);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+
   const sortedTeams = useMemo(() => [...teams].sort(compareTeamOrder), [teams]);
 
   const sensors = useSensors(
@@ -300,6 +309,66 @@ export default function AdminTeamsPage({ params }: Props) {
     }
   }
 
+  // Deleting all teams also deletes the game's scores first — Score rows are
+  // keyed by teamId and are NOT auto-cascaded when a Team is deleted, so
+  // leaving them behind would orphan them. Mirrors the game-delete cascade in
+  // app/api/admin/games/route.ts and the scores-page reset.
+  async function handleDeleteAll() {
+    setDeletingAll(true);
+    setConfirmDeleteAll(false);
+    setError(null);
+    try {
+      const scores = await listAll((opts) =>
+        client.models.Score.list({ ...opts, filter: { gameId: { eq: slug } } })
+      );
+      const scoreFailures: string[] = [];
+      await mapWithConcurrency(scores, 20, async (s) => {
+        try {
+          await withRetry(async () => {
+            const { errors } = await client.models.Score.delete(
+              { id: s.id },
+              { authMode: 'userPool' }
+            );
+            if (errors && errors.length > 0) throw new Error(errors[0].message);
+          });
+        } catch (err) {
+          scoreFailures.push(s.id);
+          console.error(`Score deletion failed for ${s.id}:`, err);
+        }
+      });
+      if (scoreFailures.length > 0) {
+        setError(`Failed to delete ${scoreFailures.length} score(s). Please try again.`);
+        return;
+      }
+
+      const allTeams = await listAll((opts) =>
+        client.models.Team.list({ ...opts, filter: { gameId: { eq: slug } } })
+      );
+      const teamFailures: string[] = [];
+      await mapWithConcurrency(allTeams, 20, async (t) => {
+        try {
+          await withRetry(async () => {
+            const { errors } = await client.models.Team.delete(
+              { id: t.id },
+              { authMode: 'userPool' }
+            );
+            if (errors && errors.length > 0) throw new Error(errors[0].message);
+          });
+        } catch (err) {
+          teamFailures.push(t.id);
+          console.error(`Team deletion failed for ${t.id}:`, err);
+        }
+      });
+      if (teamFailures.length > 0) {
+        setError(`Failed to delete ${teamFailures.length} team(s). Please try again.`);
+      }
+    } catch {
+      setError('Failed to delete all teams. Please try again.');
+    } finally {
+      setDeletingAll(false);
+    }
+  }
+
   async function handleDragEnd({ active, over }: DragEndEvent) {
     if (!over || active.id === over.id) return;
 
@@ -389,33 +458,75 @@ export default function AdminTeamsPage({ params }: Props) {
           No teams yet.
         </div>
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext
-            items={sortedTeams.map((t) => t.id)}
-            strategy={verticalListSortingStrategy}
+        <>
+          <div className="mb-2 flex items-center justify-end gap-2">
+            {confirmDeleteAll ? (
+              <>
+                <span className="text-xs text-gray-500">
+                  Delete all {sortedTeams.length} teams and their scores?
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteAll()}
+                  className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
+                >
+                  Confirm
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmDeleteAll(false)}
+                  className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteAll(true)}
+                disabled={deletingAll}
+                className="flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+              >
+                {deletingAll && (
+                  <Spinner className="h-3.5 w-3.5 border-2 border-red-200 border-t-red-600" />
+                )}
+                {deletingAll ? 'Deleting…' : 'Delete all'}
+              </button>
+            )}
+          </div>
+
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
           >
-            <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
-              {sortedTeams.map((team) => (
-                <SortableTeamRow
-                  key={team.id}
-                  team={team}
-                  editingId={editingId}
-                  editName={editName}
-                  onEditStart={(t) => {
-                    setEditingId(t.id);
-                    setEditName(t.name);
-                  }}
-                  onEditChange={setEditName}
-                  onEditSave={(id) => void handleSaveEdit(id)}
-                  onEditCancel={() => setEditingId(null)}
-                  onGroupChange={(id, g) => void handleGroupChange(id, g)}
-                  onDelete={(t) => void handleDelete(t)}
-                  deleting={deletingTeamId === team.id}
-                />
-              ))}
-            </ul>
-          </SortableContext>
-        </DndContext>
+            <SortableContext
+              items={sortedTeams.map((t) => t.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
+                {sortedTeams.map((team) => (
+                  <SortableTeamRow
+                    key={team.id}
+                    team={team}
+                    editingId={editingId}
+                    editName={editName}
+                    onEditStart={(t) => {
+                      setEditingId(t.id);
+                      setEditName(t.name);
+                    }}
+                    onEditChange={setEditName}
+                    onEditSave={(id) => void handleSaveEdit(id)}
+                    onEditCancel={() => setEditingId(null)}
+                    onGroupChange={(id, g) => void handleGroupChange(id, g)}
+                    onDelete={(t) => void handleDelete(t)}
+                    deleting={deletingTeamId === team.id}
+                  />
+                ))}
+              </ul>
+            </SortableContext>
+          </DndContext>
+        </>
       )}
     </div>
   );
