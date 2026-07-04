@@ -209,7 +209,8 @@ export default function AdminTeamsPage({ params }: Props) {
         setTeams(items);
         if (items.length > 0) setGameOwnerId(items[0].ownerId);
         if (isSynced) setLoading(false);
-      }
+      },
+      `team:byGame:${slug}`
     );
   }, [slug]);
 

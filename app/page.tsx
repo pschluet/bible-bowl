@@ -36,7 +36,8 @@ export default function GamePickerPage() {
       ({ items, isSynced }) => {
         setGames(items);
         if (isSynced) setLoading(false);
-      }
+      },
+      `game:all:${mode}`
     );
   }, [authMode]);
 
