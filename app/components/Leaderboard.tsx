@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 import GroupPill from '@/app/components/GroupPill';
 import { GROUP_TYPES, GROUP_LABELS } from '@/app/lib/constants';
 
@@ -44,15 +44,7 @@ function LatestBadge({ history }: { history: ScoreHistoryEntry[] }) {
   );
 }
 
-function TeamRow({
-  team,
-  rank,
-  isFavorite,
-  onFavorite,
-  isExpanded,
-  onToggle,
-  className = '',
-}: {
+type TeamRowProps = {
   team: LeaderboardTeam;
   rank: number;
   isFavorite: boolean;
@@ -60,7 +52,60 @@ function TeamRow({
   isExpanded: boolean;
   onToggle: (id: string) => void;
   className?: string;
-}) {
+};
+
+/**
+ * Value-based equality for a leaderboard team. app/g/[slug]/page.tsx rebuilds
+ * a brand-new object for every team on every score delta (Amplify's
+ * observeQuery re-delivers the FULL list on every write — see
+ * app/lib/liveQuery.ts), so comparing `team` by reference would re-render
+ * every row on every write. This compares the handful of fields TeamRow
+ * actually renders instead.
+ */
+function teamsEqual(a: LeaderboardTeam, b: LeaderboardTeam): boolean {
+  if (a === b) return true;
+  if (a.id !== b.id || a.name !== b.name || a.total !== b.total || a.groupType !== b.groupType) {
+    return false;
+  }
+  if (a.history.length !== b.history.length) return false;
+  for (let i = 0; i < a.history.length; i++) {
+    if (
+      a.history[i].questionNumber !== b.history[i].questionNumber ||
+      a.history[i].points !== b.history[i].points
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function teamRowPropsEqual(prev: TeamRowProps, next: TeamRowProps): boolean {
+  return (
+    prev.rank === next.rank &&
+    prev.isFavorite === next.isFavorite &&
+    prev.isExpanded === next.isExpanded &&
+    prev.className === next.className &&
+    prev.onFavorite === next.onFavorite &&
+    prev.onToggle === next.onToggle &&
+    teamsEqual(prev.team, next.team)
+  );
+}
+
+/**
+ * Memoized (with a value-based comparator, see `teamRowPropsEqual`) so a
+ * score update for one team doesn't re-render every other team's row.
+ * Depends on `onToggle`/`onFavorite` being stable callbacks (useCallback in
+ * the parents) — an unstable callback would defeat this on every render.
+ */
+const TeamRow = memo(function TeamRow({
+  team,
+  rank,
+  isFavorite,
+  onFavorite,
+  isExpanded,
+  onToggle,
+  className = '',
+}: TeamRowProps) {
   return (
     <div className={className}>
       <div className="flex items-center gap-3 px-4 py-4">
@@ -110,7 +155,7 @@ function TeamRow({
       )}
     </div>
   );
-}
+}, teamRowPropsEqual);
 
 function ScoreHistory({ history }: { history: ScoreHistoryEntry[] }) {
   if (history.length === 0) return <p className="text-sm text-gray-400">No scores yet</p>;
@@ -235,31 +280,43 @@ export default function Leaderboard({
   loading,
 }: LeaderboardProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  const onToggle = (id: string) =>
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  // useCallback (stable identity) so TeamRow's React.memo isn't defeated by a
+  // fresh onToggle reference on every Leaderboard render — this component
+  // re-renders on every score delta since `teams` is a new array each time.
+  const onToggle = useCallback(
+    (id: string) =>
+      setExpandedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }),
+    []
+  );
   const [favExpandedIds, setFavExpandedIds] = useState<Set<string>>(new Set());
-  const onFavToggle = (id: string) =>
-    setFavExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const onFavToggle = useCallback(
+    (id: string) =>
+      setFavExpandedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }),
+    []
+  );
 
   // Per-group expand/collapse state (show all vs. show top N)
   const [expandedGroupKeys, setExpandedGroupKeys] = useState<Set<string>>(new Set());
-  const onGroupToggle = (key: string) =>
-    setExpandedGroupKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+  const onGroupToggle = useCallback(
+    (key: string) =>
+      setExpandedGroupKeys((prev) => {
+        const next = new Set(prev);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      }),
+    []
+  );
 
   if (loading) {
     return (

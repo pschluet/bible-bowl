@@ -24,11 +24,10 @@ export default function ScorekeeperPage() {
   const [gameSynced, setGameSynced] = useState(false);
   const [scoresSynced, setScoresSynced] = useState(false);
 
-  // The scorekeeper's team — found by matching scorekeeperUserId to userSub
-  const myTeam = useMemo(
-    () => allTeams.find((t) => t.scorekeeperUserId === userSub) ?? null,
-    [allTeams, userSub]
-  );
+  // The Team stream below is already filtered server-side to this
+  // scorekeeper's own team(s) (see the `byScorekeeper` index), so the first
+  // item is their team.
+  const myTeam = useMemo(() => allTeams[0] ?? null, [allTeams]);
   const myTeamId = myTeam?.id ?? null;
 
   // The game for this team — subscribed by gameId once we have a team
@@ -48,16 +47,24 @@ export default function ScorekeeperPage() {
     });
   }, []);
 
-  // Team stream — all teams (scorekeeper finds theirs by scorekeeperUserId)
+  // Team stream — narrowed server-side to this scorekeeper's own team(s) via
+  // the `byScorekeeper` index, instead of streaming every team in every game
+  // to every scorekeeper just to find one row.
   useEffect(() => {
+    if (!userSub) return;
     return subscribeLive(
-      () => client.models.Team.observeQuery({ authMode: 'userPool' }),
+      () =>
+        client.models.Team.observeQuery({
+          authMode: 'userPool',
+          filter: { scorekeeperUserId: { eq: userSub } },
+        }),
       ({ items, isSynced }) => {
         setAllTeams(items);
         if (isSynced) setTeamsSynced(true);
-      }
+      },
+      `team:byScorekeeper:${userSub}`
     );
-  }, []);
+  }, [userSub]);
 
   // Game stream — subscribed by gameId once we know the team's game
   const gameId = myTeam?.gameId ?? null;
@@ -80,7 +87,8 @@ export default function ScorekeeperPage() {
       ({ items, isSynced }) => {
         setGameItems(items);
         if (isSynced) setGameSynced(true);
-      }
+      },
+      `game:bySlug:${gameId}`
     );
   }, [gameId]);
 
@@ -102,7 +110,8 @@ export default function ScorekeeperPage() {
       ({ items, isSynced }) => {
         setTeamScores(items);
         if (isSynced) setScoresSynced(true);
-      }
+      },
+      `score:byTeam:${myTeamId}`
     );
   }, [myTeamId]);
 

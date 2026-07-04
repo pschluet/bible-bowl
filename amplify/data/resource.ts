@@ -88,7 +88,10 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       // Efficient per-game team list, sorted by displayOrder.
       index('gameId').sortKeys(['displayOrder']).name('byGame'),
-      // Keep the original per-team score lookup.
+      // Efficient "find my team" lookup for the scorekeeper page — without
+      // this, a scorekeeper's client subscribes to and downloads every team
+      // in every game just to find the one row bound to their account.
+      index('scorekeeperUserId').name('byScorekeeper'),
     ])
     .authorization((allow) => [
       allow.guest().to(['read']),

@@ -47,7 +47,8 @@ export default function AdminGameUsersPage({ params }: Props) {
           authMode: 'userPool',
           filter: { slug: { eq: slug } },
         }),
-      ({ items }) => setGame(items[0] ?? null)
+      ({ items }) => setGame(items[0] ?? null),
+      `game:bySlug:${slug}`
     );
   }, [slug]);
 
@@ -61,7 +62,8 @@ export default function AdminGameUsersPage({ params }: Props) {
         }),
       ({ items }) => {
         setTeams([...items].sort(compareTeamOrder));
-      }
+      },
+      `team:byGame:${slug}`
     );
   }, [slug]);
 
@@ -115,7 +117,8 @@ export default function AdminGameUsersPage({ params }: Props) {
         });
 
         setTokens(mapped);
-      }
+      },
+      `token:byGame:${slug}`
     );
   }, [teams, slug]);
 

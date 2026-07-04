@@ -14,10 +14,20 @@ import outputs from '@/amplify_outputs.json';
 import type { Schema } from '@/amplify/data/resource';
 import { getServerSession } from '@/app/lib/auth';
 import { makeCognitoClient, USER_POOL_ID } from '@/app/lib/cognito';
+import { mapWithConcurrency, withRetry } from '@/app/lib/concurrency';
 
 function attr(user: UserType, name: string): string {
   return user.Attributes?.find((a) => a.Name === name)?.Value ?? '';
 }
+
+/**
+ * Maximum simultaneous in-flight AdminListGroupsForUser calls. The Cognito
+ * Admin API has fairly low per-account TPS limits — fanning out one call per
+ * user with an unbounded Promise.all trips throttling once the user pool
+ * grows. Bounded concurrency + retry keeps this safe at any pool size (same
+ * pattern as the game-deletion route's Cognito calls).
+ */
+const USERS_CONCURRENCY = 10;
 
 // ---------------------------------------------------------------------------
 // GET /api/admin/users — list all Cognito users with their groups
@@ -51,32 +61,33 @@ export async function GET() {
     paginationToken = res.PaginationToken;
   } while (paginationToken);
 
-  // Fetch groups for each user in parallel
-  const users = await Promise.all(
-    allUsers.map(async (u) => {
-      const username = u.Username ?? '';
-      const email = attr(u, 'email');
-      const sub = attr(u, 'sub');
-      const status = u.UserStatus ?? '';
+  // Fetch groups for each user with bounded concurrency + retry so this
+  // doesn't trip Cognito Admin API rate limits as the user pool grows.
+  const users = await mapWithConcurrency(allUsers, USERS_CONCURRENCY, async (u) => {
+    const username = u.Username ?? '';
+    const email = attr(u, 'email');
+    const sub = attr(u, 'sub');
+    const status = u.UserStatus ?? '';
 
-      let groups: string[] = [];
-      try {
-        const groupsRes = await cognitoClient.send(
+    let groups: string[] = [];
+    try {
+      const groupsRes = await withRetry(() =>
+        cognitoClient.send(
           new AdminListGroupsForUserCommand({
             UserPoolId: USER_POOL_ID,
             Username: username,
           })
-        );
-        groups = (groupsRes.Groups ?? [])
-          .map((g: { GroupName?: string }) => g.GroupName ?? '')
-          .filter(Boolean);
-      } catch (err) {
-        console.error(`Failed to fetch groups for user ${username}:`, err);
-      }
+        )
+      );
+      groups = (groupsRes.Groups ?? [])
+        .map((g: { GroupName?: string }) => g.GroupName ?? '')
+        .filter(Boolean);
+    } catch (err) {
+      console.error(`Failed to fetch groups for user ${username}:`, err);
+    }
 
-      return { username, email, sub, status, groups };
-    })
-  );
+    return { username, email, sub, status, groups };
+  });
 
   return NextResponse.json({ users });
 }

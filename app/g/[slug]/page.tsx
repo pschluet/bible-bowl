@@ -119,7 +119,8 @@ export default function GameLeaderboardPage({ params }: Props) {
           if (items.length === 0) setGameNotFound(true);
         }
         setGame(items[0] ?? null);
-      }
+      },
+      `game:bySlug:${slug}:${mode}`
     );
   }, [authMode, slug]);
 
@@ -136,7 +137,8 @@ export default function GameLeaderboardPage({ params }: Props) {
       ({ items, isSynced }) => {
         setRawTeams(items);
         if (isSynced) setTeamsSynced(true);
-      }
+      },
+      `team:byGame:${slug}:${mode}`
     );
   }, [authMode, slug]);
 
@@ -153,10 +155,19 @@ export default function GameLeaderboardPage({ params }: Props) {
       ({ items, isSynced }) => {
         setRawScores(items);
         if (isSynced) setScoresSynced(true);
-      }
+      },
+      `score:byGame:${slug}:${mode}`
     );
   }, [authMode, slug]);
 
+  // Amplify's observeQuery re-delivers the FULL score list on every single
+  // write (see app/lib/liveQuery.ts), so this rebuilds every team's derived
+  // object on every delta — even for teams whose scores didn't change.
+  // Rather than fight that with a cross-render reference cache (which would
+  // need to mutate a ref during render — disallowed by this project's React
+  // Compiler lint rules), Leaderboard's per-row memoization does a cheap
+  // value-based comparison of each team's data instead of relying on
+  // reference equality, so an unaffected row still skips its re-render.
   const teams = useMemo((): LeaderboardTeam[] => {
     const latestByCell = new Map<string, (typeof rawScores)[number]>();
     for (const s of rawScores) {

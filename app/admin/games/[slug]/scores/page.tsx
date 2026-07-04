@@ -4,9 +4,10 @@ import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import type { Schema } from '@/amplify/data/resource';
-import { GROUP_LABELS, GroupType, compareTeamOrder, scoreId } from '@/app/lib/constants';
+import { GROUP_LABELS, GroupType, compareTeamOrder, listAll, scoreId } from '@/app/lib/constants';
 import { subscribeLive } from '@/app/lib/liveQuery';
 import { downloadCsv, escapeCsvField, localTimestamp } from '@/app/lib/csv';
+import { mapWithConcurrency, withRetry } from '@/app/lib/concurrency';
 import ScoreGrid from '@/app/components/ScoreGrid';
 import QuickEntryDrawer from '@/app/components/QuickEntryDrawer';
 import KeyboardLegend from '@/app/components/KeyboardLegend';
@@ -17,6 +18,14 @@ type Score = Schema['Score']['type'];
 type Game = Schema['Game']['type'];
 
 const client = generateClient<Schema>({ authMode: 'userPool' });
+
+/**
+ * Maximum simultaneous in-flight delete mutations when resetting a game's
+ * scores. An unbounded Promise.all over a full list page can trip AppSync /
+ * DynamoDB write-capacity limits on a large game; bounded concurrency +
+ * retry avoids that (same pattern as the game-deletion API route).
+ */
+const RESET_DELETE_CONCURRENCY = 20;
 
 /**
  * Fire-and-forget: after a full load we delete any duplicate Score records
@@ -109,6 +118,14 @@ export default function AdminScoresPage({ params }: Props) {
 
   const sortedTeams = useMemo(() => [...teams].sort(compareTeamOrder), [teams]);
 
+  // Amplify's observeQuery re-delivers the FULL score list on every single
+  // write (see app/lib/liveQuery.ts), so this rebuilds every team's inner Map
+  // on every delta — even for teams whose scores didn't change. Rather than
+  // fight that with a cross-render reference cache (which would need to
+  // mutate a ref during render — disallowed by this project's React
+  // Compiler lint rules), ScoreGrid's per-row memoization does a cheap
+  // value-based comparison of `byQuestion` instead of relying on reference
+  // equality, so an unaffected row still skips its re-render.
   const scoreMap = useMemo(() => {
     const map = new Map<string, Map<number, Score>>();
     for (const score of scores) {
@@ -149,7 +166,8 @@ export default function AdminScoresPage({ params }: Props) {
       ({ items, isSynced }) => {
         setTeams(items);
         if (isSynced) setTeamsSynced(true);
-      }
+      },
+      `team:byGame:${slug}`
     );
   }, [slug]);
 
@@ -170,7 +188,8 @@ export default function AdminScoresPage({ params }: Props) {
             healDuplicates(items);
           }
         }
-      }
+      },
+      `score:byGame:${slug}`
     );
   }, [slug]);
 
@@ -184,7 +203,8 @@ export default function AdminScoresPage({ params }: Props) {
         }),
       ({ items }) => {
         setGame(items[0] ?? null);
-      }
+      },
+      `game:bySlug:${slug}`
     );
   }, [slug]);
 
@@ -245,18 +265,33 @@ export default function AdminScoresPage({ params }: Props) {
     setBusy(true);
     setError(null);
     try {
-      // Delete all scores for this game
-      let nextToken: string | null | undefined;
-      do {
-        const page = await client.models.Score.list({
-          filter: { gameId: { eq: slug } },
-          ...(nextToken ? { nextToken } : {}),
-        });
-        await Promise.all(
-          page.data.map((s) => client.models.Score.delete({ id: s.id }, { authMode: 'userPool' }))
-        );
-        nextToken = page.nextToken;
-      } while (nextToken);
+      // Delete all scores for this game with bounded concurrency + retry so
+      // a large game can't trip AppSync / DynamoDB throttling and silently
+      // leave orphaned score rows.
+      const allScores = await listAll((opts) =>
+        client.models.Score.list({ ...opts, filter: { gameId: { eq: slug } } })
+      );
+      const failures: string[] = [];
+      await mapWithConcurrency(allScores, RESET_DELETE_CONCURRENCY, async (s) => {
+        try {
+          await withRetry(async () => {
+            const { errors } = await client.models.Score.delete(
+              { id: s.id },
+              { authMode: 'userPool' }
+            );
+            if (errors && errors.length > 0) {
+              throw new Error(errors[0].message);
+            }
+          });
+        } catch (err) {
+          failures.push(s.id);
+          console.error(`Score deletion failed for ${s.id}:`, err);
+        }
+      });
+      if (failures.length > 0) {
+        setError(`Failed to reset ${failures.length} score(s). Please try again.`);
+        return;
+      }
 
       // Reset currentQuestion (keep the game, just reset progress)
       await client.models.Game.update(

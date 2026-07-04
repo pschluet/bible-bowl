@@ -71,7 +71,8 @@ export default function AdminGamesPage() {
       ({ items, isSynced }) => {
         setGames(items);
         if (isSynced) setLoading(false);
-      }
+      },
+      'game:all:userPool'
     );
   }, []);
 
