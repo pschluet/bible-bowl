@@ -10,6 +10,7 @@ import { downloadCsv, escapeCsvField, localTimestamp } from '@/app/lib/csv';
 import ScoreGrid from '@/app/components/ScoreGrid';
 import QuickEntryDrawer from '@/app/components/QuickEntryDrawer';
 import KeyboardLegend from '@/app/components/KeyboardLegend';
+import Spinner from '@/app/components/Spinner';
 
 type Team = Schema['Team']['type'];
 type Score = Schema['Score']['type'];
@@ -476,8 +477,9 @@ export default function AdminScoresPage({ params }: Props) {
           type="button"
           onClick={handleReset}
           disabled={busy || loading}
-          className="mt-3 rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+          className="mt-3 flex items-center gap-1.5 rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
         >
+          {busy && <Spinner />}
           Reset Scores &amp; Questions
         </button>
       </div>

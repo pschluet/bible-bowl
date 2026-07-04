@@ -19,22 +19,42 @@ import {
   AdminUserGlobalSignOutCommand,
   AdminDeleteUserCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
-import { generateServerClientUsingCookies } from '@aws-amplify/adapter-nextjs/data';
+import { createServerRunner } from '@aws-amplify/adapter-nextjs';
+import {
+  generateServerClientUsingCookies,
+  generateServerClientUsingReqRes,
+} from '@aws-amplify/adapter-nextjs/data';
+import { fetchAuthSession } from 'aws-amplify/auth/server';
 import outputs from '@/amplify_outputs.json';
 import type { Schema } from '@/amplify/data/resource';
 import { getServerSession } from '@/app/lib/auth';
 import { makeCognitoClient, USER_POOL_ID } from '@/app/lib/cognito';
 import { listAll, normalizeSlug, validateSlug } from '@/app/lib/constants';
-import { mapWithConcurrency, withRetry, RETRYABLE_RE } from '@/app/lib/concurrency';
+import { mapWithConcurrency, withRetry } from '@/app/lib/concurrency';
 
 // Allow up to 60 s on serverless hosts for large game deletions
 export const maxDuration = 60;
 
 /**
- * Maximum simultaneous in-flight delete mutations.  Kept low to stay inside
- * AppSync / DynamoDB / Cognito admin-API rate limits at full scale (~4 000 scores).
+ * Maximum simultaneous in-flight delete mutations. AppSync/DynamoDB write
+ * capacity is the only remaining limiter (see runWithAmplifyServerContext
+ * below for why Cognito Identity Pool credentials are no longer a factor),
+ * so this can run comfortably higher than a naive per-call client would allow.
  */
-const DELETE_CONCURRENCY = 5;
+const DELETE_CONCURRENCY = 20;
+
+// `createServerRunner` must be called once and its runner reused — each call
+// builds a fresh Amplify singleton. Reused across requests at module scope.
+const { runWithAmplifyServerContext } = createServerRunner({ config: outputs });
+
+// The request/response ("ReqRes") server client's model methods take a
+// `contextSpec` as their first argument, which lets many operations share
+// ONE Amplify server context — and therefore one credentials-provider
+// instance/cache — instead of each call building (and cold-starting) its own.
+const reqResClient = generateServerClientUsingReqRes<Schema>({
+  config: outputs,
+  authMode: 'userPool',
+});
 
 // ---------------------------------------------------------------------------
 // POST /api/admin/games — create a game
@@ -110,17 +130,14 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: 'gameId is required' }, { status: 400 });
   }
 
-  // apiKey for reads (broad guest-visible data); userPool for deletes so AppSync
+  // apiKey for reads (broad guest-visible data) — apiKey auth never touches
+  // Cognito credential resolution, so these are safe at any concurrency.
+  // Privileged deletes use `reqResClient` (declared at module scope) so AppSync
   // enforces the SuperAdmins group rule / owner rule (publicApiKey lacks delete).
   const apiKeyClient = generateServerClientUsingCookies<Schema>({
     config: outputs,
     cookies,
     authMode: 'apiKey',
-  });
-  const userPoolClient = generateServerClientUsingCookies<Schema>({
-    config: outputs,
-    cookies,
-    authMode: 'userPool',
   });
 
   // Verify the game exists and the caller has permission
@@ -171,80 +188,107 @@ export async function DELETE(request: Request) {
     }
   });
 
-  // 2. Delete all scores for this game (paginated).
-  //    ~4 000 records at full scale — bounded concurrency + retry keeps us inside
-  //    AppSync / DynamoDB write-capacity limits.
-  const scores = await listAll((opts) =>
-    apiKeyClient.models.Score.list({ ...opts, filter: { gameId: { eq: gameId } } })
-  );
-  const scoreFailures: string[] = [];
-  await mapWithConcurrency(scores, DELETE_CONCURRENCY, async (s) => {
-    try {
-      await withRetry(async () => {
-        const { errors } = await userPoolClient.models.Score.delete({ id: s.id });
-        if (errors?.some((e) => RETRYABLE_RE.test(e.message))) {
-          throw new Error(errors[0].message);
+  // Steps 2-5 run inside ONE Amplify server context so they share a single
+  // credentials-provider instance/cache instead of each `.delete()` call
+  // building (and cold-starting) its own — see module-level comment on
+  // `reqResClient`. Without this, concurrent deletes each independently
+  // resolve Cognito Identity Pool credentials and trip its rate limit
+  // (surfaces as "NoSignedUser: No current user" wrapping a
+  // TooManyRequestsException on GetCredentialsForIdentity).
+  const outcome = await runWithAmplifyServerContext({
+    nextServerContext: { cookies },
+    operation: async (contextSpec): Promise<{ ok: true } | { ok: false; error: string }> => {
+      // Prime the shared credentials cache once (good for ~50 min) before
+      // fanning out concurrent deletes below, so none of them have to
+      // resolve credentials cold.
+      await withRetry(() => fetchAuthSession(contextSpec));
+
+      // 2. Delete all scores for this game (paginated).
+      //    ~4 000 records at full scale — bounded concurrency + retry keeps us
+      //    inside AppSync / DynamoDB write-capacity limits.
+      const scores = await listAll((opts) =>
+        apiKeyClient.models.Score.list({ ...opts, filter: { gameId: { eq: gameId } } })
+      );
+      const scoreFailures: string[] = [];
+      await mapWithConcurrency(scores, DELETE_CONCURRENCY, async (s) => {
+        try {
+          await withRetry(async () => {
+            const { errors } = await reqResClient.models.Score.delete(contextSpec, { id: s.id });
+            // Any error (not just retryable ones) means the record wasn't
+            // actually deleted — throw so it's retried/reported instead of
+            // silently left orphaned.
+            if (errors && errors.length > 0) {
+              throw new Error(errors[0].message);
+            }
+          });
+        } catch (err) {
+          scoreFailures.push(s.id);
+          console.error(`Score deletion failed for ${s.id}:`, err);
         }
       });
-    } catch (err) {
-      scoreFailures.push(s.id);
-      console.error(`Score deletion failed for ${s.id}:`, err);
-    }
-  });
-  if (scoreFailures.length > 0) {
-    return NextResponse.json(
-      { error: `Failed to delete ${scoreFailures.length} score record(s). Please try again.` },
-      { status: 500 }
-    );
-  }
+      if (scoreFailures.length > 0) {
+        return {
+          ok: false,
+          error: `Failed to delete ${scoreFailures.length} score record(s). Please try again.`,
+        };
+      }
 
-  // 3. Delete all tokens for this game (non-fatal — tokens are already consumed/expired).
-  const tokens = await listAll((opts) =>
-    apiKeyClient.models.OnboardingToken.list({ ...opts, filter: { gameId: { eq: gameId } } })
-  );
-  await mapWithConcurrency(tokens, DELETE_CONCURRENCY, async (t) => {
-    try {
-      await withRetry(async () => {
-        const { errors } = await apiKeyClient.models.OnboardingToken.delete({
-          tokenId: t.tokenId,
-        });
-        if (errors?.some((e) => RETRYABLE_RE.test(e.message))) {
-          throw new Error(errors[0].message);
+      // 3. Delete all tokens for this game (non-fatal — tokens are already
+      //    consumed/expired). Uses apiKeyClient — unaffected by the Identity
+      //    Pool credential path, so no need to share this context.
+      const tokens = await listAll((opts) =>
+        apiKeyClient.models.OnboardingToken.list({ ...opts, filter: { gameId: { eq: gameId } } })
+      );
+      await mapWithConcurrency(tokens, DELETE_CONCURRENCY, async (t) => {
+        try {
+          await withRetry(async () => {
+            const { errors } = await apiKeyClient.models.OnboardingToken.delete({
+              tokenId: t.tokenId,
+            });
+            if (errors && errors.length > 0) {
+              throw new Error(errors[0].message);
+            }
+          });
+        } catch (err) {
+          console.error(`Token deletion failed for ${t.tokenId} (non-fatal):`, err);
         }
       });
-    } catch (err) {
-      console.error(`Token deletion failed for ${t.tokenId} (non-fatal):`, err);
-    }
-  });
 
-  // 4. Delete all teams for this game.
-  const teamFailures: string[] = [];
-  await mapWithConcurrency(gameTeams, DELETE_CONCURRENCY, async (t) => {
-    try {
-      await withRetry(async () => {
-        const { errors } = await userPoolClient.models.Team.delete({ id: t.id });
-        if (errors?.some((e) => RETRYABLE_RE.test(e.message))) {
-          throw new Error(errors[0].message);
+      // 4. Delete all teams for this game.
+      const teamFailures: string[] = [];
+      await mapWithConcurrency(gameTeams, DELETE_CONCURRENCY, async (t) => {
+        try {
+          await withRetry(async () => {
+            const { errors } = await reqResClient.models.Team.delete(contextSpec, { id: t.id });
+            if (errors && errors.length > 0) {
+              throw new Error(errors[0].message);
+            }
+          });
+        } catch (err) {
+          teamFailures.push(t.id);
+          console.error(`Team deletion failed for ${t.id}:`, err);
         }
       });
-    } catch (err) {
-      teamFailures.push(t.id);
-      console.error(`Team deletion failed for ${t.id}:`, err);
-    }
+      if (teamFailures.length > 0) {
+        return {
+          ok: false,
+          error: `Failed to delete ${teamFailures.length} team(s). Please try again.`,
+        };
+      }
+
+      // 5. Delete the game itself.
+      const { errors } = await reqResClient.models.Game.delete(contextSpec, { slug: gameId });
+      if (errors && errors.length > 0) {
+        console.error('Game deletion errors:', errors);
+        return { ok: false, error: 'Failed to delete game.' };
+      }
+
+      return { ok: true };
+    },
   });
-  if (teamFailures.length > 0) {
-    return NextResponse.json(
-      { error: `Failed to delete ${teamFailures.length} team(s). Please try again.` },
-      { status: 500 }
-    );
-  }
 
-  // 5. Delete the game itself.
-  const { errors } = await userPoolClient.models.Game.delete({ slug: gameId });
-  if (errors && errors.length > 0) {
-    console.error('Game deletion errors:', errors);
-    return NextResponse.json({ error: 'Failed to delete game.' }, { status: 500 });
+  if (!outcome.ok) {
+    return NextResponse.json({ error: outcome.error }, { status: 500 });
   }
-
   return NextResponse.json({ success: true });
 }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getCurrentUser } from 'aws-amplify/auth';
 import { SCOREKEEPER_EMAIL_DOMAIN } from '@/app/lib/cognito';
+import Spinner from '@/app/components/Spinner';
 
 interface CognitoUser {
   username: string;
@@ -233,8 +234,9 @@ export default function SuperAdminUsersPage() {
                           type="button"
                           onClick={() => void handleDeleteUser(user)}
                           disabled={deleting}
-                          className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                          className="flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                         >
+                          {deleting && <Spinner />}
                           {deleting ? 'Deleting…' : 'Confirm'}
                         </button>
                         <button

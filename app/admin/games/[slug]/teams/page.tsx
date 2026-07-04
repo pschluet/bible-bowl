@@ -23,6 +23,7 @@ import { CSS } from '@dnd-kit/utilities';
 import type { Schema } from '@/amplify/data/resource';
 import { compareTeamOrder, GROUP_LABELS, GROUP_TYPES, type GroupType } from '@/app/lib/constants';
 import { subscribeLive } from '@/app/lib/liveQuery';
+import Spinner from '@/app/components/Spinner';
 
 type Team = Schema['Team']['type'];
 
@@ -58,6 +59,7 @@ interface RowProps {
   onEditCancel: () => void;
   onGroupChange: (id: string, g: GroupType) => void;
   onDelete: (team: Team) => void;
+  deleting: boolean;
 }
 
 function SortableTeamRow({
@@ -70,6 +72,7 @@ function SortableTeamRow({
   onEditCancel,
   onGroupChange,
   onDelete,
+  deleting,
 }: RowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: team.id,
@@ -146,9 +149,13 @@ function SortableTeamRow({
           <button
             type="button"
             onClick={() => onDelete(team)}
-            className="text-sm font-medium text-red-600 hover:text-red-800"
+            disabled={deleting}
+            className="flex items-center gap-1.5 text-sm font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
           >
-            Delete
+            {deleting && (
+              <Spinner className="h-3.5 w-3.5 border-2 border-red-200 border-t-red-600" />
+            )}
+            {deleting ? 'Deleting…' : 'Delete'}
           </button>
         </div>
       </div>
@@ -175,6 +182,8 @@ export default function AdminTeamsPage({ params }: Props) {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+
+  const [deletingTeamId, setDeletingTeamId] = useState<string | null>(null);
 
   const sortedTeams = useMemo(() => [...teams].sort(compareTeamOrder), [teams]);
 
@@ -257,10 +266,13 @@ export default function AdminTeamsPage({ params }: Props) {
   async function handleDelete(team: Team) {
     if (!confirm(`Delete "${team.name}"? This cannot be undone.`)) return;
     setError(null);
+    setDeletingTeamId(team.id);
     try {
       await client.models.Team.delete({ id: team.id }, { authMode: 'userPool' });
     } catch {
       setError('Failed to delete team.');
+    } finally {
+      setDeletingTeamId(null);
     }
   }
 
@@ -363,6 +375,7 @@ export default function AdminTeamsPage({ params }: Props) {
                   onEditCancel={() => setEditingId(null)}
                   onGroupChange={(id, g) => void handleGroupChange(id, g)}
                   onDelete={(t) => void handleDelete(t)}
+                  deleting={deletingTeamId === team.id}
                 />
               ))}
             </ul>

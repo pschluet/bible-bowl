@@ -7,6 +7,7 @@ import Link from 'next/link';
 import type { Schema } from '@/amplify/data/resource';
 import { subscribeLive } from '@/app/lib/liveQuery';
 import { normalizeSlug, validateSlug } from '@/app/lib/constants';
+import Spinner from '@/app/components/Spinner';
 
 type Game = Schema['Game']['type'];
 
@@ -124,23 +125,37 @@ export default function AdminGamesPage() {
     }
   }
 
+  // Deleting a game with lots of teams/scores can transiently fail server-side
+  // (e.g. under load). The delete is idempotent and convergent — each pass only
+  // touches whatever's left — so a few automatic retries finish the job without
+  // making the admin re-click Delete themselves.
   async function handleDelete(slug: string) {
     setDeletingSlug(slug);
     setDeleteError(null);
     setDeleteConfirmSlug(null);
+
+    const maxAttempts = 3;
+    let lastError = 'Failed to delete game.';
     try {
-      const res = await fetch('/api/admin/games', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gameId: slug }),
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(data?.error ?? 'Failed to delete game.');
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const res = await fetch('/api/admin/games', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ gameId: slug }),
+          });
+          if (res.ok) return; // Game disappears via subscription
+          const data = (await res.json().catch(() => null)) as { error?: string } | null;
+          lastError = data?.error ?? lastError;
+          if (res.status === 404) break; // already gone — retrying won't help
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : lastError;
+        }
+        if (attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, 500 * attempt));
+        }
       }
-      // Game disappears via subscription
-    } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : 'Failed to delete game.');
+      setDeleteError(lastError);
     } finally {
       setDeletingSlug(null);
     }
@@ -269,10 +284,9 @@ export default function AdminGamesPage() {
                       <button
                         type="button"
                         onClick={() => void handleDelete(game.slug)}
-                        disabled={deleting}
-                        className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                        className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
                       >
-                        {deleting ? 'Deleting…' : 'Confirm'}
+                        Confirm
                       </button>
                       <button
                         type="button"
@@ -287,9 +301,12 @@ export default function AdminGamesPage() {
                       type="button"
                       onClick={() => setDeleteConfirmSlug(game.slug)}
                       disabled={deleting}
-                      className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                      className="flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
                     >
-                      Delete
+                      {deleting && (
+                        <Spinner className="h-3.5 w-3.5 border-2 border-red-200 border-t-red-600" />
+                      )}
+                      {deleting ? 'Deleting…' : 'Delete'}
                     </button>
                   )}
                 </div>
