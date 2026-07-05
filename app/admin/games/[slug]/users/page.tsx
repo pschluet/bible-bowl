@@ -180,25 +180,45 @@ export default function AdminGameUsersPage({ params }: Props) {
   }
 
   // ── End Game ───────────────────────────────────────────────────────────────
+  // Ending a game with lots of scorekeepers can transiently fail server-side
+  // (e.g. under load — same as handleDelete in app/admin/games/page.tsx). The
+  // route is idempotent and convergent — each pass only touches whatever's
+  // left — so a few automatic retries finish the job without making the admin
+  // re-click End Game themselves.
   async function handleEndGame() {
     setEndingGame(true);
     setEndGameResult(null);
     setEndGameConfirm(false);
+
+    const maxAttempts = 3;
+    let lastError = 'Failed to end game.';
     try {
-      const res = await fetch('/api/scorekeeper/end-game', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gameId: slug }),
-      });
-      if (!res.ok) throw new Error('Failed to end game.');
-      const data = (await res.json()) as { deleted?: number; failures?: number };
-      setEndGameResult(
-        `Game ended. Deleted ${data.deleted ?? 0} scorekeeper(s).${
-          (data.failures ?? 0) > 0 ? ` (${data.failures} failure(s) — see logs)` : ''
-        }`
-      );
-    } catch (err) {
-      setEndGameResult(err instanceof Error ? err.message : 'Failed to end game.');
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const res = await fetch('/api/scorekeeper/end-game', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ gameId: slug }),
+          });
+          if (res.ok) {
+            const data = (await res.json()) as { deleted?: number; failures?: number };
+            setEndGameResult(
+              `Game ended. Deleted ${data.deleted ?? 0} scorekeeper(s).${
+                (data.failures ?? 0) > 0 ? ` (${data.failures} failure(s) — see logs)` : ''
+              }`
+            );
+            return;
+          }
+          const data = (await res.json().catch(() => null)) as { error?: string } | null;
+          lastError = data?.error ?? lastError;
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : lastError;
+        }
+        if (attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, 500 * attempt));
+        }
+      }
+      setEndGameResult(lastError);
     } finally {
       setEndingGame(false);
     }
