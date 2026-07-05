@@ -43,5 +43,11 @@ export function makeCognitoClient(): CognitoIdentityProviderClient {
   return new CognitoIdentityProviderClient({
     region: outputs.auth.aws_region,
     credentials: { accessKeyId, secretAccessKey },
+    // Admin API calls (AdminCreateUser/AdminAddUserToGroup/AdminSetUserPassword) hit
+    // Cognito's throttling limits when many scorekeepers scan QR codes at once
+    // (e.g. at game start). Adaptive mode backs off based on observed throttling
+    // and paces the client's send rate, rather than retrying at a fixed cadence.
+    retryMode: 'adaptive',
+    maxAttempts: 8,
   });
 }

@@ -25,7 +25,7 @@
 
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomInt } from 'crypto';
 import {
   AdminCreateUserCommand,
   AdminGetUserCommand,
@@ -167,8 +167,11 @@ export async function POST(request: Request) {
   //
   // base64url uses only A-Za-z0-9-_ as symbols; ~35% of outputs contain
   // neither '-' nor '_', which fails Cognito's "must have symbol characters"
-  // policy. Appending '!' guarantees the requirement is always satisfied.
-  const password = randomBytes(24).toString('base64url') + '!';
+  // policy. Appending '!' guarantees that requirement is always satisfied.
+  // Similarly, ~0.4% of 32-char base64url outputs contain no digit at all
+  // (54/64 chars are non-digits), which fails the "must have numeric
+  // characters" policy — appending a random digit guarantees that too.
+  const password = randomBytes(24).toString('base64url') + randomInt(0, 10).toString() + '!';
   try {
     await cognitoClient.send(
       new AdminSetUserPasswordCommand({
