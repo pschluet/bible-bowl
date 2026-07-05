@@ -157,6 +157,12 @@ interface TokenEntry {
   tokenId: string;
 }
 
+// ── Misc helpers ──────────────────────────────────────────────────────────────
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function parseTokensFile(raw: string): string[] {
   // Try JSON first
   try {
@@ -246,8 +252,18 @@ async function main() {
 
   const cognitoClient = new CognitoIdentityProviderClient({ region: env.region });
 
+  // Real scorekeepers scan their QR codes as they arrive and sit down — over
+  // roughly a minute, not all in the same instant. Firing every exchange
+  // request in the same tick is an artificial burst that can overrun a local
+  // dev server's TCP accept backlog (unrelated to app correctness), so spread
+  // exchange requests across a window instead. Score submissions in Phase 3
+  // are NOT staggered — those intentionally simulate a true simultaneous burst.
+  const AUTH_STAGGER_WINDOW_MS = 4000;
+
   const authResults = await Promise.allSettled(
     tokenIds.map(async (tokenId): Promise<Session> => {
+      await sleep(Math.random() * AUTH_STAGGER_WINDOW_MS);
+
       // Exchange QR token for one-time Cognito credentials
       const exchangeRes = await httpRequest(`${env.baseUrl}/api/scorekeeper/exchange`, 'POST', {
         token: tokenId,
