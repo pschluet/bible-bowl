@@ -3,15 +3,21 @@
  *
  * Scoped to a single game (gameId in request body).
  *
- * Signs out all scorekeeper Cognito users bound to THIS game's teams (immediately
- * revokes their refresh tokens), then deletes the users, clears team bindings,
- * marks remaining UNUSED tokens for this game CONSUMED, and sets
- * Game.scoringOpen = false.
+ * Closes scoring on the Game FIRST (cheap, single write), then signs out and
+ * deletes all scorekeeper Cognito users bound to THIS game's teams, clears
+ * team bindings, and marks remaining UNUSED tokens for this game CONSUMED.
  *
  * Effect on scorekeepers: their next background token refresh fails; the app
  * detects the lost session and shows the "game has ended" view. Scorekeepers
  * who still hold a valid access token within its TTL (~60 min) are blocked by
  * scoringOpen before any score write reaches AppSync.
+ *
+ * At full scale (~150 scorekeepers) this fans out hundreds of Cognito admin
+ * calls and AppSync mutations — see app/api/admin/games/route.ts (DELETE) for
+ * the identical bounded-concurrency + shared-credentials pattern this mirrors.
+ * Without it, unbounded Promise.all fan-outs trip Cognito/Identity-Pool
+ * throttling, and the adaptive retrying serializes into a long enough tail to
+ * exceed the serverless function timeout (seen in prod as a 504).
  */
 
 import { NextResponse } from 'next/server';
@@ -20,12 +26,38 @@ import {
   AdminUserGlobalSignOutCommand,
   AdminDeleteUserCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
-import { generateServerClientUsingCookies } from '@aws-amplify/adapter-nextjs/data';
+import { createServerRunner } from '@aws-amplify/adapter-nextjs';
+import {
+  generateServerClientUsingCookies,
+  generateServerClientUsingReqRes,
+} from '@aws-amplify/adapter-nextjs/data';
+import { fetchAuthSession } from 'aws-amplify/auth/server';
 import outputs from '@/amplify_outputs.json';
 import type { Schema } from '@/amplify/data/resource';
 import { getServerSession } from '@/app/lib/auth';
 import { makeCognitoClient, USER_POOL_ID } from '@/app/lib/cognito';
 import { listAll } from '@/app/lib/constants';
+import { mapWithConcurrency, withRetry } from '@/app/lib/concurrency';
+
+// Allow up to 60 s on serverless hosts for large games (mirrors the DELETE
+// route in app/api/admin/games/route.ts, which hits the same scale).
+export const maxDuration = 60;
+
+/** Maximum simultaneous in-flight Cognito/AppSync mutations. */
+const END_GAME_CONCURRENCY = 20;
+
+// `createServerRunner` must be called once and its runner reused — each call
+// builds a fresh Amplify singleton. Reused across requests at module scope.
+const { runWithAmplifyServerContext } = createServerRunner({ config: outputs });
+
+// The request/response ("ReqRes") server client's model methods take a
+// `contextSpec` as their first argument, which lets many operations share
+// ONE Amplify server context — and therefore one credentials-provider
+// instance/cache — instead of each call building (and cold-starting) its own.
+const reqResClient = generateServerClientUsingReqRes<Schema>({
+  config: outputs,
+  authMode: 'userPool',
+});
 
 export async function POST(request: Request) {
   const session = await getServerSession();
@@ -45,12 +77,6 @@ export async function POST(request: Request) {
     cookies,
     authMode: 'apiKey',
   });
-  // userPool client for writes that need the admin's identity (null-clearing team bindings).
-  const userPoolClient = generateServerClientUsingCookies<Schema>({
-    config: outputs,
-    cookies,
-    authMode: 'userPool',
-  });
 
   // Verify the game exists and the caller is the owner (or super admin)
   const { data: game } = await dataClient.models.Game.get({ slug: gameId });
@@ -61,6 +87,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
+  // 1. Close scoring FIRST. This is the one action that actually "ends" the
+  //    game for scorekeepers — do it before the (potentially slow) teardown
+  //    below so a timeout or partial failure downstream doesn't leave the
+  //    game silently still open.
+  try {
+    await dataClient.models.Game.update({
+      slug: gameId,
+      scoringOpen: false,
+    });
+  } catch (err) {
+    console.error('Game.scoringOpen=false update failed:', err);
+    return NextResponse.json({ error: 'Failed to close scoring.' }, { status: 500 });
+  }
+
   let cognitoClient: ReturnType<typeof makeCognitoClient>;
   try {
     cognitoClient = makeCognitoClient();
@@ -69,7 +109,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
   }
 
-  // 1. Get this game's teams. scorekeeperEmail is the exact Cognito username set
+  // 2. Get this game's teams. scorekeeperEmail is the exact Cognito username set
   //    during QR exchange — use it directly instead of listing the whole group.
   const gameTeams = await listAll((opts) =>
     dataClient.models.Team.list({ ...opts, filter: { gameId: { eq: gameId } } })
@@ -79,45 +119,66 @@ export async function POST(request: Request) {
     .filter((t) => t.scorekeeperEmail)
     .map((t) => t.scorekeeperEmail as string);
 
-  // 3. Sign out then delete each game scorekeeper.
+  // 3. Sign out then delete each game scorekeeper, bounded concurrency to
+  //    stay under Cognito's admin-API throttle.
   //    UserNotFoundException means the user is already gone — treat as success.
   let deleteFailures = 0;
-  await Promise.all(
-    gameScorekeeper.map(async (username) => {
-      try {
-        await cognitoClient.send(
-          new AdminUserGlobalSignOutCommand({ UserPoolId: USER_POOL_ID, Username: username })
-        );
-      } catch (err) {
-        if ((err as { name?: string }).name !== 'UserNotFoundException') {
-          console.error(`AdminUserGlobalSignOut failed for ${username}:`, err);
-        }
+  await mapWithConcurrency(gameScorekeeper, END_GAME_CONCURRENCY, async (username) => {
+    try {
+      await cognitoClient.send(
+        new AdminUserGlobalSignOutCommand({ UserPoolId: USER_POOL_ID, Username: username })
+      );
+    } catch (err) {
+      if ((err as { name?: string }).name !== 'UserNotFoundException') {
+        console.error(`AdminUserGlobalSignOut failed for ${username}:`, err);
       }
-      try {
-        await cognitoClient.send(
+    }
+    try {
+      await withRetry(() =>
+        cognitoClient.send(
           new AdminDeleteUserCommand({ UserPoolId: USER_POOL_ID, Username: username })
-        );
-      } catch (err) {
-        if ((err as { name?: string }).name !== 'UserNotFoundException') {
-          console.error(`AdminDeleteUser failed for ${username}:`, err);
-          deleteFailures++;
-        }
+        )
+      );
+    } catch (err) {
+      if ((err as { name?: string }).name !== 'UserNotFoundException') {
+        console.error(`AdminDeleteUser failed for ${username}:`, err);
+        deleteFailures++;
       }
-    })
-  );
+    }
+  });
 
-  // 4. Clear team bindings — use userPool auth so null values are accepted by AppSync.
+  // 4. Clear team bindings — use userPool auth so null values are accepted by
+  //    AppSync. Runs inside ONE Amplify server context so all updates share a
+  //    single credentials-provider instance/cache instead of each `.update()`
+  //    call building (and cold-starting) its own — without this, concurrent
+  //    updates each independently resolve Cognito Identity Pool credentials
+  //    and trip its rate limit (surfaces as "NoSignedUser: No current user"
+  //    wrapping a TooManyRequestsException on GetCredentialsForIdentity).
   try {
     const boundTeams = gameTeams.filter((t) => t.scorekeeperUserId || t.scorekeeperEmail);
     if (boundTeams.length > 0) {
-      await Promise.all(
-        boundTeams.map((t) =>
-          userPoolClient.models.Team.update(
-            { id: t.id, scorekeeperUserId: null, scorekeeperEmail: null },
-            { authMode: 'userPool' }
-          )
-        )
-      );
+      await runWithAmplifyServerContext({
+        nextServerContext: { cookies },
+        operation: async (contextSpec) => {
+          // Prime the shared credentials cache once (good for ~50 min) before
+          // fanning out concurrent updates below, so none of them have to
+          // resolve credentials cold.
+          await withRetry(() => fetchAuthSession(contextSpec));
+
+          await mapWithConcurrency(boundTeams, END_GAME_CONCURRENCY, async (t) => {
+            await withRetry(async () => {
+              const { errors } = await reqResClient.models.Team.update(contextSpec, {
+                id: t.id,
+                scorekeeperUserId: null,
+                scorekeeperEmail: null,
+              });
+              if (errors && errors.length > 0) {
+                throw new Error(errors[0].message);
+              }
+            });
+          });
+        },
+      });
     }
   } catch (err) {
     console.error('Team binding cleanup failed:', err);
@@ -134,32 +195,18 @@ export async function POST(request: Request) {
 
     if (unusedTokens.length > 0) {
       const consumedAt = new Date().toISOString();
-      await Promise.all(
-        unusedTokens.map((t) =>
+      await mapWithConcurrency(unusedTokens, END_GAME_CONCURRENCY, async (t) => {
+        await withRetry(() =>
           dataClient.models.OnboardingToken.update({
             tokenId: t.tokenId,
             status: 'CONSUMED',
             consumedAt,
           })
-        )
-      );
+        );
+      });
     }
   } catch (err) {
     console.error('Token cleanup failed (non-fatal):', err);
-  }
-
-  // 6. Close scoring on the Game (best-effort).
-  //    Scorekeepers whose access token hasn't expired yet will be blocked here
-  //    before any score write reaches AppSync.
-  try {
-    // Use apiKey since the owner rule is satisfied by having the game's ownerId
-    // match — but apiKey is simpler and already validated above.
-    await dataClient.models.Game.update({
-      slug: gameId,
-      scoringOpen: false,
-    });
-  } catch (err) {
-    console.error('Game.scoringOpen=false update failed (non-fatal):', err);
   }
 
   return NextResponse.json({

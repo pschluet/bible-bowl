@@ -8,6 +8,7 @@ import { compareTeamOrder } from '@/app/lib/constants';
 import { SCOREKEEPER_EMAIL_DOMAIN } from '@/app/lib/cognito';
 import QrCodeDisplay, { type QrToken } from '@/app/components/QrCodeDisplay';
 import QrCodePrintGrid from '@/app/components/QrCodePrintGrid';
+import Spinner from '@/app/components/Spinner';
 
 type Team = Schema['Team']['type'];
 type Game = Schema['Game']['type'];
@@ -373,7 +374,7 @@ export default function AdminGameUsersPage({ params }: Props) {
                 disabled={endingGame}
                 className="rounded-md bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
               >
-                {endingGame ? 'Ending…' : 'Confirm'}
+                Confirm
               </button>
               <button
                 type="button"
@@ -387,9 +388,13 @@ export default function AdminGameUsersPage({ params }: Props) {
             <button
               type="button"
               onClick={() => setEndGameConfirm(true)}
-              className="rounded-md bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700"
+              disabled={endingGame}
+              className="flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
             >
-              End Game
+              {endingGame && (
+                <Spinner className="h-3.5 w-3.5 border-2 border-red-200 border-t-white" />
+              )}
+              {endingGame ? 'Ending…' : 'End Game'}
             </button>
           )}
         </div>
