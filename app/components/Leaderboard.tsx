@@ -184,6 +184,7 @@ function GroupSection({
   isGroupExpanded,
   onGroupToggle,
   groupKey,
+  className = '',
 }: {
   label: string;
   groupType: string | null;
@@ -195,6 +196,7 @@ function GroupSection({
   isGroupExpanded: boolean;
   onGroupToggle: (key: string) => void;
   groupKey: string;
+  className?: string;
 }) {
   if (teams.length === 0) return null;
 
@@ -224,7 +226,7 @@ function GroupSection({
   if (!isGroupExpanded && teams.length <= 5) toggleClass = 'flex lg:hidden';
 
   return (
-    <div className="mt-3 lg:mt-0">
+    <div className={`mt-3 lg:mt-0 ${className}`}>
       <div className="px-4 pb-1 pt-2">
         <span
           className={
@@ -346,6 +348,10 @@ export default function Leaderboard({
     byGroup.get(key)!.push(team);
   }
 
+  // Only the group types with at least one team get a column, so desktop can
+  // center a narrower set of columns instead of leaving empty grid tracks.
+  const activeGroups = GROUP_TYPES.filter((g) => (byGroup.get(g)?.length ?? 0) > 0);
+
   // Find all favorited teams across all groups with their within-group ranks, in group display order
   const favorites: { team: LeaderboardTeam; rank: number }[] = [];
   if (favoriteTeamIds.size) {
@@ -410,15 +416,17 @@ export default function Leaderboard({
         </div>
       )}
 
-      {/* Mobile: stacked sections. Desktop (lg+): 3-column grid, one column per age group. */}
-      <div className="lg:mt-4 lg:grid lg:grid-cols-3 lg:gap-6">
-        {GROUP_TYPES.map((g) => (
+      {/* Mobile: stacked sections. Desktop (lg+): flex row, one column per
+          present team type, columns kept a consistent width and centered. */}
+      <div className="lg:mt-4 lg:flex lg:justify-center lg:gap-6">
+        {activeGroups.map((g) => (
           <GroupSection
             key={g}
             groupType={g}
             label={GROUP_LABELS[g]}
             teams={byGroup.get(g) ?? []}
             groupKey={g}
+            className="lg:min-w-0 lg:max-w-md lg:flex-1"
             isGroupExpanded={expandedGroupKeys.has(g)}
             favoriteTeamIds={favoriteTeamIds}
             onFavorite={onFavorite}
