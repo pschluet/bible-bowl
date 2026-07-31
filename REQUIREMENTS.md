@@ -27,12 +27,12 @@ data with GraphQL subscriptions for live updates).
 
 ## 2. Actors & Roles
 
-| Role | How obtained | Capabilities |
-|---|---|---|
-| **Viewer** | No login | View the public leaderboard at `/g/[slug]`, view the games list at `/` |
-| **Scorekeeper** | Scans a QR code onboarding link (`/scan?token=...`); synthetic Cognito account created automatically, bound to one Team | Submit scores question-by-question for their bound team at `/scorekeeper` |
-| **Admin** | Created by a SuperAdmin at `/admin/users`, or via `npm run seed:admin` | Full CRUD on games they own: teams, scores, QR onboarding, scoring on/off, end game, delete game |
-| **SuperAdmin** | Created via `npm run seed:admin -- email --super` | Everything an Admin can do, on **any** game (ownership check bypassed); manage all Admin users at `/admin/users` |
+| Role            | How obtained                                                                                                            | Capabilities                                                                                                     |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **Viewer**      | No login                                                                                                                | View the public leaderboard at `/g/[slug]`, view the games list at `/`                                           |
+| **Scorekeeper** | Scans a QR code onboarding link (`/scan?token=...`); synthetic Cognito account created automatically, bound to one Team | Submit scores question-by-question for their bound team at `/scorekeeper`                                        |
+| **Admin**       | Created by a SuperAdmin at `/admin/users`, or via `npm run seed:admin`                                                  | Full CRUD on games they own: teams, scores, QR onboarding, scoring on/off, end game, delete game                 |
+| **SuperAdmin**  | Created via `npm run seed:admin -- email --super`                                                                       | Everything an Admin can do, on **any** game (ownership check bypassed); manage all Admin users at `/admin/users` |
 
 Role is derived purely from the `cognito:groups` claim on the verified JWT
 access token (`app/lib/auth.ts`) — `isAdmin = SuperAdmins ∪ Admins`,
@@ -43,6 +43,7 @@ non-admins to `/login`.
 ## 3. Data Model
 
 ### Game
+
 - PK: `slug` (immutable, lowercase alphanumeric + hyphens, 2–64 chars, not a reserved word)
 - `title`, `ownerId` (creating admin's Cognito sub)
 - `currentQuestion` (int) — the question scorekeepers may currently score
@@ -50,15 +51,18 @@ non-admins to `/login`.
 - `scoringOpen` (bool) — `false` = closed; `null`/absent is treated as **open**
 
 ### Team
+
 - `gameId` (FK → `Game.slug`), `ownerId` (denormalized), `name`, `groupType` (`Teen` | `PreTeen` | `Adult`, optional), `displayOrder` (int, optional)
 - `scorekeeperUserId` / `scorekeeperEmail` — set when a scorekeeper claims the team via QR exchange; cleared on End Game
 
 ### Score
+
 - One row per `(teamId, questionNumber)`, enforced by a **deterministic id**: `` `${teamId}#${questionNumber}` `` (`scoreId()` in `app/lib/constants.ts:26`)
 - `points` — intended range `{0, 1, 2, 3}`
 - A resubmission for the same team+question is an `update`, never a second row
 
 ### OnboardingToken
+
 - PK: `tokenId` (UUID v4), `gameId`, `teamId`, `ownerId`, `status` (`UNUSED` | `CONSUMED`), `expiresAt`, `consumedAt`, `batchId`
 - One token grants sign-in for exactly one team, once
 
@@ -70,6 +74,7 @@ non-admins to `/login`.
 
 **US-1**: As an Admin, I want to create a new game with a title and a
 game code (slug), so that I have a dedicated event to manage.
+
 - Slug is auto-derived from the title but editable.
 - On submit, the raw slug is normalized (`normalizeSlug`: lowercased, spaces→hyphens, non-`[a-z0-9-]` stripped, hyphens collapsed/trimmed) then validated (`validateSlug`):
   - Required, 2–64 characters
@@ -84,6 +89,7 @@ my events.
 
 **US-3**: As an Admin, I want to delete a game and have all of its data
 cleaned up, so no orphaned data remains.
+
 - Requires confirmation.
 - Only the owning Admin or a SuperAdmin may delete (**403** otherwise); **404** if the game doesn't exist.
 - Cascade order (`DELETE /api/admin/games`, `maxDuration = 60`): (1) sign out + delete all scorekeeper Cognito accounts bound to the game's teams (best-effort), (2) delete all Score rows, (3) delete all OnboardingToken rows (best-effort, non-fatal), (4) delete all Team rows, (5) delete the Game.
@@ -93,6 +99,7 @@ cleaned up, so no orphaned data remains.
 
 **US-4**: As a Viewer, I want to see a live-updating leaderboard for a
 game without logging in, so I can follow scores in real time.
+
 - Teams are sorted **descending by total score**, tie-broken alphabetically by name (`app/g/[slug]/page.tsx:198`).
 - Grouped into columns by `groupType` in the fixed order Teen → Pre-Teen → Adult, plus an "Other" section (teams with no/unrecognized groupType) always rendered full-width below. Only groups with ≥1 team get a column.
 - Within each group, rank badges are 🥇/🥈/🥉 for the first three positions, then a plain number, computed purely from position in the (already-sorted) list (`rankLabel`, `Leaderboard.tsx:24-29`) — see [Bug #1](#known-bugs--issues-to-fix) regarding ties.
@@ -104,6 +111,7 @@ game without logging in, so I can follow scores in real time.
 
 **US-5**: As a Viewer, I want to mark a team as my favorite, so I can find
 it quickly without scrolling.
+
 - Tapping the star toggles favorite status; favorited team IDs persist in `localStorage` under key `bb_favorite` (as a JSON array; a bare string is also read for backward compatibility with an older single-favorite format).
 - Every favorited team gets its own sticky card pinned to the top of the page (above all groups), showing its rank within its own group, independent of how many teams are favorited.
 - Score totals update live without a page refresh via GraphQL subscriptions on Team/Score/Game.
@@ -112,6 +120,7 @@ it quickly without scrolling.
 
 **US-6**: As an event organizer, I want to generate one QR code per team,
 so that scorekeepers can sign themselves in without a password.
+
 - `POST /api/scorekeeper/generate` (Admin only, owner or SuperAdmin; **403** otherwise): bulk (all teams in the game) or single-team (`teamId` supplied) regeneration.
 - Before creating new tokens, all currently-`UNUSED` tokens in the affected scope are marked `CONSUMED` (old QR printouts stop working once new ones are generated).
 - New tokens expire **8 hours** from generation time.
@@ -119,6 +128,7 @@ so that scorekeepers can sign themselves in without a password.
 
 **US-7**: As a Scorekeeper, I want to scan my team's QR code and be
 signed in automatically, so I don't need to remember a password.
+
 - `POST /api/scorekeeper/exchange` (unauthenticated):
   - Unknown `tokenId` → **404** `INVALID_TOKEN`
   - Already `CONSUMED` → **409** `TOKEN_ALREADY_USED`
@@ -133,6 +143,7 @@ signed in automatically, so I don't need to remember a password.
 
 **US-8**: As a Scorekeeper, I want to submit a 0–3 score for the current
 question for my team, so the leaderboard updates.
+
 - All scorekeeper score writes go through `POST /api/scorekeeper/score` (never a direct client write) and are validated **in this order**:
   1. Caller must have a valid Scorekeeper session (**401** otherwise).
   2. Body validation: `teamId` required non-empty string, `questionNumber` a positive integer, `points ∈ {0,1,2,3}` (**400** on any violation).
@@ -152,15 +163,18 @@ session, e.g. after an admin's "End Game" globally signs the scorekeeper out.)
 ### 4.5 Admin Score Grid (`/admin/games/[slug]/scores`)
 
 **US-10**: As an Admin, I want to initialize a game, so scoring can begin.
+
 - "Initialize Game" sets `currentQuestion: 1, maxQuestionReached: 1, scoringOpen: true`. Only shown while `currentQuestion` is unset.
 
 **US-11**: As an Admin, I want to move to the next or previous question, so
 I control pacing.
+
 - "Next Question": `currentQuestion += 1`; `maxQuestionReached = max(currentQuestion, maxQuestionReached)` — ratchets up only.
 - "Previous Question": `currentQuestion -= 1`, disabled/no-op when `currentQuestion <= 1`. Does **not** decrease `maxQuestionReached`, so later columns and their scores remain visible in the grid and CSV export even after navigating back.
 
 **US-12**: As an Admin, I want to enter scores directly in a spreadsheet-style
 grid (teams × questions) using mouse or keyboard, so I can score quickly.
+
 - Admin writes go straight to AppSync (not through `/api/scorekeeper/score`) using the same deterministic `scoreId`.
 - Keyboard shortcuts: `0`–`3` to score the selected cell, `x` to clear it, arrow keys/Tab to navigate.
 - A "Quick Entry" drawer offers a mobile-friendly one-team-at-a-time swipeable flow with the same scoring semantics.
@@ -169,10 +183,12 @@ grid (teams × questions) using mouse or keyboard, so I can score quickly.
 
 **US-13**: As an Admin, I want to export all scores to CSV, so I can archive
 or share results outside the app.
+
 - Columns: Team, Type, Q1..Q`maxQuestionReached`, Total. Blank cells for unscored questions. Filename includes a local timestamp.
 
 **US-14**: As an Admin, I want to reset a game's scores and question
 progress (keeping teams), so I can rerun or fix a botched event.
+
 - Requires a confirmation dialog.
 - Deletes all Score rows for the game (bounded concurrency 20 + retry); if any deletions fail, the whole reset aborts with an error and the game state is **not** reset (partial-failure protection against orphaned scores).
 - On full success, resets `currentQuestion: 1, maxQuestionReached: 1, scoringOpen: true`. Teams are preserved.
@@ -181,10 +197,12 @@ progress (keeping teams), so I can rerun or fix a botched event.
 
 **US-15**: As an Admin, I want to add a team with a name and division, so
 it appears in the game.
+
 - Name is required (trimmed, non-blank); `displayOrder` is computed client-side as `(max existing displayOrder) + 1`.
 
 **US-16**: As an Admin, I want to bulk-add teams by pasting a roster, so I
 don't have to add dozens of teams one at a time.
+
 - Two parallel textareas: names (one per line) and types (one per line).
 - **Single-type shortcut**: if the types textarea has exactly one non-blank line, that type applies to every name row.
 - Rows where both name and type are blank are silently skipped (not reported as errors).
@@ -196,20 +214,24 @@ inline, so I can fix data entry mistakes.
 
 **US-18**: As an Admin, I want to drag-and-drop reorder teams, so the
 display order matches my roster sheet.
+
 - Reordering recomputes `displayOrder` for the affected teams and persists via parallel updates; on failure, the local reorder is rolled back to the previous state.
 
 **US-19**: As an Admin, I want to delete a single team, so I can remove a
 no-show.
+
 - Requires confirmation. **Does not delete that team's Score rows** — see [Bug #11](#known-bugs--issues-to-fix).
 
 **US-20**: As an Admin, I want to delete all teams (and their scores) for a
 game at once, so I can start over.
+
 - Requires confirmation. Deletes all Score rows for the game first, then all Team rows (explicitly to avoid orphaning scores — the comment in the code notes Team deletion does not auto-cascade Score rows). Reports partial failures without silently succeeding.
 
 ### 4.7 Scorekeeper/QR Administration & Game Controls (`/admin/games/[slug]/users`)
 
 **US-21**: As an Admin, I want to view and toggle whether scorekeeper score
 entry is open, independent of ending the whole game.
+
 - Toggle flips `Game.scoringOpen`. `scoringOpen !== false` is treated as "enabled" (so `null`/undefined defaults to enabled).
 
 **US-22**: As an Admin, I want to view each team's QR code (individually or
@@ -221,6 +243,7 @@ currently bound to which teams, so I can verify onboarding worked.
 
 **US-24**: As an Admin, I want to "End Game," so scoring is definitively
 closed and all scorekeeper accounts for this game are cleaned up.
+
 - `POST /api/scorekeeper/end-game` (owner or SuperAdmin only): (1) sets `scoringOpen: false` **first**, guaranteeing scoring is closed even if the rest of the teardown partially fails; (2) globally signs out and deletes every scorekeeper Cognito account bound to this game's teams (`UserNotFoundException` treated as success, bounded concurrency 20); (3) clears `scorekeeperUserId`/`scorekeeperEmail` on those teams; (4) marks all remaining `UNUSED` tokens for the game `CONSUMED`. **Scores and Teams are preserved.**
 - The client UI automatically retries the request up to 3 times with backoff (500ms × attempt) since the operation is idempotent/convergent — each retry only touches what's still left to clean up.
 
@@ -228,6 +251,7 @@ closed and all scorekeeper accounts for this game are cleaned up.
 
 **US-25**: As a SuperAdmin, I want to create a new Admin by email, so they
 can manage their own games.
+
 - Creates a Cognito user in the `Admins` group with the invitation email suppressed (relies on Cognito's default temp-password flow); **409** if the email/username already exists.
 
 **US-26**: As a SuperAdmin, I want to see every user in the system with
@@ -235,6 +259,7 @@ their role badge (Super Admin / Admin / QR Scorekeeper / Scorekeeper) and
 status, so I can audit access.
 
 **US-27**: As a SuperAdmin, I want to delete any user except myself.
+
 - Self-deletion is blocked (**400**) by comparing the target `sub` to the caller's session `sub`.
 - If a `sub` is supplied, any Team bound to that user has its `scorekeeperUserId`/`scorekeeperEmail` cleared (best-effort) before the Cognito account is globally signed out and deleted.
 - No group-based restriction otherwise — a SuperAdmin can delete another Admin or SuperAdmin this way, not just scorekeepers.
@@ -249,17 +274,17 @@ Sign-up is disabled on this form (`hideSignUp`) — see the stale-README note ab
 verify the caller's role and, where applicable, game ownership, since there
 is no global middleware:
 
-| Route | Method | Required role | Ownership check |
-|---|---|---|---|
-| `/api/admin/games` | POST | Admin | n/a (creates as caller) |
-| `/api/admin/games` | DELETE | Admin | owner or SuperAdmin |
-| `/api/admin/users` | GET | SuperAdmin | n/a |
-| `/api/admin/users` | POST | SuperAdmin | n/a |
-| `/api/admin/users` | DELETE | SuperAdmin | n/a (self-delete blocked) |
-| `/api/scorekeeper/generate` | POST | Admin | owner or SuperAdmin |
-| `/api/scorekeeper/exchange` | POST | **none** (public) | token-scoped |
-| `/api/scorekeeper/score` | POST | Scorekeeper | team-binding match |
-| `/api/scorekeeper/end-game` | POST | Admin | owner or SuperAdmin |
+| Route                       | Method | Required role     | Ownership check           |
+| --------------------------- | ------ | ----------------- | ------------------------- |
+| `/api/admin/games`          | POST   | Admin             | n/a (creates as caller)   |
+| `/api/admin/games`          | DELETE | Admin             | owner or SuperAdmin       |
+| `/api/admin/users`          | GET    | SuperAdmin        | n/a                       |
+| `/api/admin/users`          | POST   | SuperAdmin        | n/a                       |
+| `/api/admin/users`          | DELETE | SuperAdmin        | n/a (self-delete blocked) |
+| `/api/scorekeeper/generate` | POST   | Admin             | owner or SuperAdmin       |
+| `/api/scorekeeper/exchange` | POST   | **none** (public) | token-scoped              |
+| `/api/scorekeeper/score`    | POST   | Scorekeeper       | team-binding match        |
+| `/api/scorekeeper/end-game` | POST   | Admin             | owner or SuperAdmin       |
 
 Unauthenticated/wrong-role access should return **401**; wrong-owner access
 on an existing resource should return **403**; a missing game/team/token
@@ -300,7 +325,7 @@ needs a product decision first or is a straightforward code fix.
    array position within a group. Two teams tied at the same total (a very
    plausible scenario in a 0–3-point-per-question quiz) get 🥇 and 🥈
    instead of both showing 🥇 (or some other explicit tie convention).
-   *Needs a product decision*: standard competition ranking (1,1,3) vs.
+   _Needs a product decision_: standard competition ranking (1,1,3) vs.
    dense ranking (1,1,2) vs. current behavior.
 
 2. **Silent write failure in the admin score-save fallback path.**
@@ -310,7 +335,7 @@ needs a product decision first or is a straightforward code fix.
    If both calls fail for a non-collision reason, nothing is thrown, no
    error is shown, and the optimistic UI keeps displaying the score as
    saved even though the database write never succeeded.
-   *Straightforward fix*: check `errors` on the fallback update too, and
+   _Straightforward fix_: check `errors` on the fallback update too, and
    surface/rollback on failure like the `catch` block already does.
 
 3. **Fire-and-forget duplicate-score cleanup has no error handling.**
@@ -318,36 +343,40 @@ needs a product decision first or is a straightforward code fix.
    `client.models.Score.delete(...)` with `void` and no `.catch()`. A failed
    cleanup delete (permission error, throttling) leaves a stale duplicate
    Score row indefinitely with zero visibility to the admin.
-   *Straightforward fix*: catch and surface/report failures, or route
+   _Straightforward fix_: catch and surface/report failures, or route
    through the existing `withRetry` helper used elsewhere in this file.
 
 4. **Confusingly-named `entryDisabled` variable feeds a field meaning "open."**
    `app/admin/games/[slug]/users/page.tsx:172-176`:
+
    ```js
    const entryDisabled = game.scoringOpen === false;
    await client.models.Game.update({ slug, scoringOpen: entryDisabled }, ...);
    ```
+
    This is correct today only via an unintuitive double-negation
-   (`entryDisabled` = "was it currently disabled" = the *new* `scoringOpen`
+   (`entryDisabled` = "was it currently disabled" = the _new_ `scoringOpen`
    value). A future refactor renaming this to `!entryDisabled` "for
    clarity" would silently invert the toggle.
-   *Straightforward fix*: rename to something like `nextScoringOpen` and
+   _Straightforward fix_: rename to something like `nextScoringOpen` and
    assign directly, or compute it as `!currentlyEnabled` without the
    confusing name. Pin the exact enabled↔disabled transitions (including
    `scoringOpen` starting `null`/`undefined`) with a test either way.
 
 5. **Dead/misleading fallback in the token-dedup comparator.**
    `app/admin/games/[slug]/users/page.tsx:100-102`:
+
    ```js
    const itemDate = item.expiresAt ?? item.consumedAt ?? '';
    ```
+
    `expiresAt` is always set at token creation and never cleared, so
    `?? item.consumedAt` is unreachable — despite the code visually implying
    consumption time tie-breaks two `CONSUMED` tokens. Not currently harmful
    since expiry ordering happens to track creation ordering, but misleading
    and would silently misbehave if `expiresAt` ever became nullable
    independent of creation.
-   *Straightforward fix*: remove the dead fallback or make the intent explicit.
+   _Straightforward fix_: remove the dead fallback or make the intent explicit.
 
 6. **Duplicated, inconsistent-fallback "latest wins" tie-break logic across three files.**
    The pattern `(s.updatedAt ?? '') > (prev.updatedAt ?? '')` for
@@ -355,11 +384,11 @@ needs a product decision first or is a straightforward code fix.
    `app/g/[slug]/page.tsx:176`, `app/admin/games/[slug]/scores/page.tsx:95,109,141`.
    When two records both lack `updatedAt` (e.g. a brand-new optimistic
    record that hasn't round-tripped yet), `'' > ''` is `false`, so the
-   *first-encountered* record wins — which depends on Amplify
+   _first-encountered_ record wins — which depends on Amplify
    `observeQuery`'s array order, not actual recency. Because the comparator
    is duplicated three times, a future fix to the tie-break rule in one
    file is unlikely to be mirrored in the others.
-   *Needs a product decision* on the correct tie-break rule, then a
+   _Needs a product decision_ on the correct tie-break rule, then a
    straightforward fix to extract one shared helper.
 
 7. **Concurrent team-add can produce duplicate `displayOrder` values.**
@@ -373,7 +402,7 @@ needs a product decision first or is a straightforward code fix.
    insertion order — notable because the rest of this codebase is
    unusually careful about exactly this class of race (see the extensive
    concurrency-safety comments in the same file).
-   *Straightforward fix* (or accept and test the current tie-break
+   _Straightforward fix_ (or accept and test the current tie-break
    behavior explicitly): move `displayOrder` assignment to a server-side
    atomic sequence, or at minimum document/test the name-tiebreak fallback.
 
@@ -384,18 +413,18 @@ needs a product decision first or is a straightforward code fix.
    until the live `existingScore` subscription prop eventually updates and
    syncs `submittedScore` at render time. There is a window where the
    "already scored" error and an active button grid are shown together.
-   *Straightforward fix*: disable the button grid (or show the confirmation
+   _Straightforward fix_: disable the button grid (or show the confirmation
    state) immediately on a 409/`ALREADY_SCORED` response instead of waiting
    for the subscription to catch up.
 
 9. **No server/schema-level range validation on `Score.points` for admin writes.**
    `amplify/data/resource.ts:123` declares `points: a.integer().required()`
    with no min/max, and the admin score grid / Quick Entry writes directly
-   to AppSync (bypassing `/api/scorekeeper/score`, which *does* validate
+   to AppSync (bypassing `/api/scorekeeper/score`, which _does_ validate
    `points ∈ {0,1,2,3}`). The UI only offers `POINT_OPTIONS` buttons, but
    nothing stops a malformed/malicious direct Amplify SDK call from writing
    an out-of-range or negative `points` value for an admin-authored score.
-   *Needs a product decision*: add schema-level validation (if Amplify Gen2
+   _Needs a product decision_: add schema-level validation (if Amplify Gen2
    supports it) or explicit server-side range checks on all write paths,
    not just the scorekeeper route.
 
@@ -406,20 +435,20 @@ needs a product decision first or is a straightforward code fix.
     segment used everywhere in the actual routing). The real, only
     onboarding path is the QR-token exchange described in section 4.3;
     sign-up is explicitly hidden (`hideSignUp` in `app/(auth)/login/page.tsx:61`).
-    *Straightforward fix*: update `README.md` to match the QR-based flow so
+    _Straightforward fix_: update `README.md` to match the QR-based flow so
     it isn't mistaken for intended-but-unbuilt behavior when writing tests.
 
 11. **Deleting a single team does not delete its Score rows (orphaning).**
     `app/admin/games/[slug]/teams/page.tsx:299-310` (`handleDelete`) deletes
     only the `Team` row. By contrast, "Delete all teams" and the game-level
     `DELETE /api/admin/games` route both explicitly delete a game's Score
-    rows before/alongside its Teams specifically *because* Team deletion
+    rows before/alongside its Teams specifically _because_ Team deletion
     doesn't cascade (the code comments elsewhere say so directly). A
     single-team delete leaves that team's Score rows behind, referencing a
     now-nonexistent `teamId` — these are invisible in the UI (which always
     joins through the current Team list) but persist in the database and
     would appear as orphaned rows in a full-table CSV/audit.
-    *Needs a product decision*: is this an accepted trade-off (users rarely
+    _Needs a product decision_: is this an accepted trade-off (users rarely
     delete a team mid-event) or should single delete also cascade its
     scores? Either way, write a test that pins the chosen behavior
     explicitly rather than leaving it accidental.
@@ -428,17 +457,17 @@ needs a product decision first or is a straightforward code fix.
 
 ## 7. Appendix — API Route Reference
 
-| Endpoint | Method | Auth | Body | Success | Key errors |
-|---|---|---|---|---|---|
-| `/api/admin/games` | POST | Admin | `{ slug, title }` | `200 { slug }` | `400` invalid title/slug, `401` unauthenticated, `409` slug taken |
-| `/api/admin/games` | DELETE | Admin, owner/SuperAdmin | `{ gameId }` | `200 { success: true }` | `400` missing gameId, `401`, `403` not owner, `404` game missing, `500` partial cascade failure |
-| `/api/admin/users` | GET | SuperAdmin | — | `200` list of `{ user, groups }` | `401`/`403` non-SuperAdmin |
-| `/api/admin/users` | POST | SuperAdmin | `{ email }` | `200` created user | `400` missing email, `409` `UsernameExistsException` |
-| `/api/admin/users` | DELETE | SuperAdmin | `{ username, sub? }` | `200` | `400` self-delete attempt |
-| `/api/scorekeeper/generate` | POST | Admin, owner/SuperAdmin | `{ gameId, teamId? }` | `200 { tokens: [...] }` | `400` missing gameId / team-game mismatch, `403` not owner, `404` game/team missing |
-| `/api/scorekeeper/exchange` | POST | none (public) | `{ token }` | `200 { username, password, teamId, teamName }` | `400` missing token, `404` `INVALID_TOKEN`/`TEAM_NOT_FOUND`, `409` `TOKEN_ALREADY_USED`, `410` `TOKEN_EXPIRED` |
-| `/api/scorekeeper/score` | POST | Scorekeeper | `{ teamId, questionNumber, points }` | `200 { success: true }` | `400` invalid body, `401` unauthenticated, `403` `TEAM_MISMATCH`/`SCORING_CLOSED`, `409` `WRONG_QUESTION`/`ALREADY_SCORED` |
-| `/api/scorekeeper/end-game` | POST | Admin, owner/SuperAdmin | `{ gameId }` | `200 { success, deleted, failures }` | `400` missing gameId, `403` not owner, `404` game missing, `500` scoring-close failure |
+| Endpoint                    | Method | Auth                    | Body                                 | Success                                        | Key errors                                                                                                                 |
+| --------------------------- | ------ | ----------------------- | ------------------------------------ | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `/api/admin/games`          | POST   | Admin                   | `{ slug, title }`                    | `200 { slug }`                                 | `400` invalid title/slug, `401` unauthenticated, `409` slug taken                                                          |
+| `/api/admin/games`          | DELETE | Admin, owner/SuperAdmin | `{ gameId }`                         | `200 { success: true }`                        | `400` missing gameId, `401`, `403` not owner, `404` game missing, `500` partial cascade failure                            |
+| `/api/admin/users`          | GET    | SuperAdmin              | —                                    | `200` list of `{ user, groups }`               | `401`/`403` non-SuperAdmin                                                                                                 |
+| `/api/admin/users`          | POST   | SuperAdmin              | `{ email }`                          | `200` created user                             | `400` missing email, `409` `UsernameExistsException`                                                                       |
+| `/api/admin/users`          | DELETE | SuperAdmin              | `{ username, sub? }`                 | `200`                                          | `400` self-delete attempt                                                                                                  |
+| `/api/scorekeeper/generate` | POST   | Admin, owner/SuperAdmin | `{ gameId, teamId? }`                | `200 { tokens: [...] }`                        | `400` missing gameId / team-game mismatch, `403` not owner, `404` game/team missing                                        |
+| `/api/scorekeeper/exchange` | POST   | none (public)           | `{ token }`                          | `200 { username, password, teamId, teamName }` | `400` missing token, `404` `INVALID_TOKEN`/`TEAM_NOT_FOUND`, `409` `TOKEN_ALREADY_USED`, `410` `TOKEN_EXPIRED`             |
+| `/api/scorekeeper/score`    | POST   | Scorekeeper             | `{ teamId, questionNumber, points }` | `200 { success: true }`                        | `400` invalid body, `401` unauthenticated, `403` `TEAM_MISMATCH`/`SCORING_CLOSED`, `409` `WRONG_QUESTION`/`ALREADY_SCORED` |
+| `/api/scorekeeper/end-game` | POST   | Admin, owner/SuperAdmin | `{ gameId }`                         | `200 { success, deleted, failures }`           | `400` missing gameId, `403` not owner, `404` game missing, `500` scoring-close failure                                     |
 
 These routes, and specifically the ordered validation checks inside
 `/api/scorekeeper/score` and the state transitions inside `/api/scorekeeper/exchange`
