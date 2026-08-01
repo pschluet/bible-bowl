@@ -12,9 +12,9 @@
     "seed:admin": "tsx scripts/seed-admin.ts",
     "typecheck": "tsc --noEmit",
     "sandbox": "NODE_OPTIONS=--no-experimental-webstorage npx ampx sandbox",
-    "test": "NODE_OPTIONS=--no-experimental-webstorage vitest run",
-    "test:watch": "NODE_OPTIONS=--no-experimental-webstorage vitest",
-    "test:coverage": "NODE_OPTIONS=--no-experimental-webstorage vitest run --coverage"
+    "test": "node scripts/run-vitest.mjs run",
+    "test:watch": "node scripts/run-vitest.mjs",
+    "test:coverage": "node scripts/run-vitest.mjs run --coverage"
   },
   "dependencies": {
     "@aws-amplify/adapter-nextjs": "^1.7.3",
