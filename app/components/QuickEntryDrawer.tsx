@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import type { Schema } from '@/amplify/data/resource';
+import { swipeDirection } from '@/app/lib/ui';
 import GroupPill from '@/app/components/GroupPill';
 import ScoreButtonGrid from '@/app/components/ScoreButtonGrid';
 
@@ -76,11 +77,10 @@ export default function QuickEntryDrawer({
     if (touchStartX.current === null) return;
     const delta = e.changedTouches[0].clientX - touchStartX.current;
     touchStartX.current = null;
-    if (Math.abs(delta) > 50) {
-      if (delta < 0)
-        onSelectNext(); // swipe left → next church
-      else onSelectPrev(); // swipe right → previous church
-    }
+    const direction = swipeDirection(delta);
+    if (direction === 'next')
+      onSelectNext(); // swipe left → next church
+    else if (direction === 'prev') onSelectPrev(); // swipe right → previous church
   }
 
   return (

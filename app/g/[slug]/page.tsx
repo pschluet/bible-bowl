@@ -12,6 +12,8 @@ import Leaderboard, {
   type LeaderboardTeam,
   type ScoreHistoryEntry,
 } from '@/app/components/Leaderboard';
+import { dedupeScoresByCell } from '@/app/lib/scores';
+import { readFavorites, serializeFavorites, sortLeaderboardTeams } from '@/app/lib/leaderboard';
 
 const FAVORITE_KEY = 'bb_favorite';
 const client = generateClient<Schema>();
@@ -44,19 +46,8 @@ export default function GameLeaderboardPage({ params }: Props) {
   const currentQuestion = game?.currentQuestion ?? null;
 
   useEffect(() => {
-    const raw = localStorage.getItem(FAVORITE_KEY);
-    if (!raw) return;
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setFavoriteTeamIds(new Set(parsed as string[]));
-        return;
-      }
-    } catch {
-      // Not valid JSON — fall through to legacy handling.
-    }
-    setFavoriteTeamIds(new Set([raw]));
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFavoriteTeamIds(readFavorites(localStorage.getItem(FAVORITE_KEY)));
   }, []);
 
   useEffect(() => {
@@ -169,33 +160,27 @@ export default function GameLeaderboardPage({ params }: Props) {
   // value-based comparison of each team's data instead of relying on
   // reference equality, so an unaffected row still skips its re-render.
   const teams = useMemo((): LeaderboardTeam[] => {
-    const latestByCell = new Map<string, (typeof rawScores)[number]>();
-    for (const s of rawScores) {
-      const k = `${s.teamId}#${s.questionNumber}`;
-      const prev = latestByCell.get(k);
-      if (!prev || (s.updatedAt ?? '') > (prev.updatedAt ?? '')) latestByCell.set(k, s);
-    }
+    const deduped = dedupeScoresByCell(rawScores);
 
     const totals = new Map<string, number>();
     const historyByTeam = new Map<string, ScoreHistoryEntry[]>();
-    for (const score of latestByCell.values()) {
+    for (const score of deduped) {
       totals.set(score.teamId, (totals.get(score.teamId) ?? 0) + (score.points ?? 0));
       const arr = historyByTeam.get(score.teamId) ?? [];
       arr.push({ questionNumber: score.questionNumber, points: score.points ?? 0 });
       historyByTeam.set(score.teamId, arr);
     }
 
-    return rawTeams
-      .map((team) => ({
-        id: team.id,
-        name: team.name,
-        total: totals.get(team.id) ?? 0,
-        groupType: team.groupType ?? null,
-        history: (historyByTeam.get(team.id) ?? []).sort(
-          (a, b) => a.questionNumber - b.questionNumber
-        ),
-      }))
-      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+    const mapped = rawTeams.map((team) => ({
+      id: team.id,
+      name: team.name,
+      total: totals.get(team.id) ?? 0,
+      groupType: team.groupType ?? null,
+      history: (historyByTeam.get(team.id) ?? []).sort(
+        (a, b) => a.questionNumber - b.questionNumber
+      ),
+    }));
+    return sortLeaderboardTeams(mapped);
   }, [rawTeams, rawScores]);
 
   const onFavorite = useCallback((id: string) => {
@@ -203,7 +188,8 @@ export default function GameLeaderboardPage({ params }: Props) {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
-      if (next.size) localStorage.setItem(FAVORITE_KEY, JSON.stringify([...next]));
+      const serialized = serializeFavorites(next);
+      if (serialized) localStorage.setItem(FAVORITE_KEY, serialized);
       else localStorage.removeItem(FAVORITE_KEY);
       return next;
     });

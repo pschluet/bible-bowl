@@ -6,6 +6,7 @@ import type { Schema } from '@/amplify/data/resource';
 import { subscribeLive } from '@/app/lib/liveQuery';
 import { compareTeamOrder } from '@/app/lib/constants';
 import { SCOREKEEPER_EMAIL_DOMAIN } from '@/app/lib/cognito';
+import { pickTokensPerTeam } from '@/app/lib/tokens';
 import QrCodeDisplay, { type QrToken } from '@/app/components/QrCodeDisplay';
 import QrCodePrintGrid from '@/app/components/QrCodePrintGrid';
 import Spinner from '@/app/components/Spinner';
@@ -83,41 +84,7 @@ export default function AdminGameUsersPage({ params }: Props) {
           setTokens([]);
           return;
         }
-
-        // Group all tokens by teamId; pick the best one per team
-        const byTeam = new Map<string, (typeof items)[number]>();
-        for (const item of items) {
-          const existing = byTeam.get(item.teamId);
-          if (!existing) {
-            byTeam.set(item.teamId, item);
-            continue;
-          }
-          if (item.status === 'UNUSED' && existing.status !== 'UNUSED') {
-            byTeam.set(item.teamId, item);
-            continue;
-          }
-          if (item.status === existing.status) {
-            const itemDate = item.expiresAt ?? item.consumedAt ?? '';
-            const existingDate = existing.expiresAt ?? existing.consumedAt ?? '';
-            if (itemDate > existingDate) byTeam.set(item.teamId, item);
-          }
-        }
-
-        const mapped: QrToken[] = teams.flatMap((team): QrToken[] => {
-          const t = byTeam.get(team.id);
-          if (!t) return [];
-          return [
-            {
-              tokenId: t.tokenId,
-              teamId: t.teamId,
-              teamName: team.name,
-              groupType: team.groupType ?? null,
-              status: (t.status ?? 'UNUSED') as 'UNUSED' | 'CONSUMED',
-            },
-          ];
-        });
-
-        setTokens(mapped);
+        setTokens(pickTokensPerTeam(items, teams));
       },
       `token:byGame:${slug}`
     );
@@ -168,12 +135,18 @@ export default function AdminGameUsersPage({ params }: Props) {
   async function handleToggleEntry() {
     if (!game) return;
     setTogglingEntry(true);
+    setGenerateError(null);
     try {
-      const entryDisabled = game.scoringOpen === false;
+      // scoringOpen !== false means "currently enabled" (null/undefined
+      // default to enabled), so the toggle's target state is the negation.
+      const currentlyEnabled = game.scoringOpen !== false;
+      const nextScoringOpen = !currentlyEnabled;
       await client.models.Game.update(
-        { slug, scoringOpen: entryDisabled },
+        { slug, scoringOpen: nextScoringOpen },
         { authMode: 'userPool' }
       );
+    } catch {
+      setGenerateError('Failed to update scorekeeper entry.');
     } finally {
       setTogglingEntry(false);
     }

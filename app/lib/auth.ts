@@ -1,6 +1,7 @@
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import { cookies } from 'next/headers';
 import outputs from '@/amplify_outputs.json';
+import { jsCookieEncodeName } from '@/app/lib/cookie-names';
 
 export interface ServerSession {
   sub: string;
@@ -24,13 +25,6 @@ const idVerifier = CognitoJwtVerifier.create({
   tokenUse: 'id',
   clientId: outputs.auth.user_pool_client_id,
 });
-
-// Mirrors the encoding that Amplify's js-cookie adapter applies to cookie names.
-// Characters like `@` in the username become `%40` in the cookie name on the wire.
-// Source: node_modules/@aws-amplify/adapter-nextjs/dist/cjs/utils/cookie/ensureEncodedForJSCookie.js
-function jsCookieEncodeName(name: string): string {
-  return encodeURIComponent(name).replace(/%(2[346B]|5E|60|7C)/gi, decodeURIComponent);
-}
 
 /**
  * Validates the Cognito session from cookies using local JWT verification.

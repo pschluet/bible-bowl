@@ -6,8 +6,15 @@ import { fetchAuthSession } from 'aws-amplify/auth';
 import type { Schema } from '@/amplify/data/resource';
 import { GROUP_LABELS, GroupType, compareTeamOrder, listAll, scoreId } from '@/app/lib/constants';
 import { subscribeLive } from '@/app/lib/liveQuery';
-import { downloadCsv, escapeCsvField, localTimestamp } from '@/app/lib/csv';
+import { buildScoresCsv, downloadCsv, scoresCsvFilename } from '@/app/lib/csv';
 import { mapWithConcurrency, withRetry } from '@/app/lib/concurrency';
+import {
+  buildScoreMap,
+  findDuplicateScoreIds,
+  isValidPoints,
+  mergeLatestById,
+  pruneStaleOptimistic,
+} from '@/app/lib/scores';
 import ScoreGrid from '@/app/components/ScoreGrid';
 import QuickEntryDrawer from '@/app/components/QuickEntryDrawer';
 import KeyboardLegend from '@/app/components/KeyboardLegend';
@@ -28,27 +35,29 @@ const client = generateClient<Schema>({ authMode: 'userPool' });
 const RESET_DELETE_CONCURRENCY = 20;
 
 /**
- * Fire-and-forget: after a full load we delete any duplicate Score records
- * (same teamId+questionNumber), keeping the one with the latest updatedAt.
+ * After a full load, deletes any duplicate Score records (same
+ * teamId+questionNumber), keeping the one with the latest updatedAt. Runs
+ * through the same bounded-concurrency + retry helper as every other bulk
+ * delete in this file, and reports (rather than silently swallowing) any
+ * deletion that still fails after retrying.
  */
-function healDuplicates(all: Score[]) {
-  const byKey = new Map<string, Score[]>();
-  for (const s of all) {
-    const k = `${s.teamId}#${s.questionNumber}`;
-    let arr = byKey.get(k);
-    if (!arr) {
-      arr = [];
-      byKey.set(k, arr);
+async function healDuplicates(all: Score[]): Promise<{ failedIds: string[] }> {
+  const idsToDelete = findDuplicateScoreIds(all);
+  if (idsToDelete.length === 0) return { failedIds: [] };
+
+  const failedIds: string[] = [];
+  await mapWithConcurrency(idsToDelete, RESET_DELETE_CONCURRENCY, async (id) => {
+    try {
+      await withRetry(async () => {
+        const { errors } = await client.models.Score.delete({ id }, { authMode: 'userPool' });
+        if (errors && errors.length > 0) throw new Error(errors[0].message);
+      });
+    } catch (err) {
+      failedIds.push(id);
+      console.error(`Duplicate-score cleanup failed for ${id}:`, err);
     }
-    arr.push(s);
-  }
-  for (const recs of byKey.values()) {
-    if (recs.length < 2) continue;
-    const sorted = [...recs].sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
-    sorted.slice(1).forEach((s) => {
-      void client.models.Score.delete({ id: s.id }, { authMode: 'userPool' });
-    });
-  }
+  });
+  return { failedIds };
 }
 
 interface Props {
@@ -87,27 +96,16 @@ export default function AdminScoresPage({ params }: Props) {
     });
   }, []);
 
-  const scores = useMemo((): Score[] => {
-    if (optimisticScores.length === 0) return streamedScores;
-    const map = new Map(streamedScores.map((s) => [s.id, s]));
-    for (const opt of optimisticScores) {
-      const streamed = map.get(opt.id);
-      if (!streamed || (opt.updatedAt ?? '') > (streamed.updatedAt ?? '')) {
-        map.set(opt.id, opt);
-      }
-    }
-    return [...map.values()];
-  }, [streamedScores, optimisticScores]);
+  const scores = useMemo(
+    (): Score[] => mergeLatestById(streamedScores, optimisticScores),
+    [streamedScores, optimisticScores]
+  );
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setOptimisticScores((prev) => {
       if (prev.length === 0) return prev;
-      const streamMap = new Map(streamedScores.map((s) => [s.id, s]));
-      const next = prev.filter((opt) => {
-        const s = streamMap.get(opt.id);
-        return !s || (opt.updatedAt ?? '') > (s.updatedAt ?? '');
-      });
+      const next = pruneStaleOptimistic(prev, streamedScores);
       return next.length === prev.length ? prev : next;
     });
   }, [streamedScores]);
@@ -129,21 +127,7 @@ export default function AdminScoresPage({ params }: Props) {
   // Compiler lint rules), ScoreGrid's per-row memoization does a cheap
   // value-based comparison of `byQuestion` instead of relying on reference
   // equality, so an unaffected row still skips its re-render.
-  const scoreMap = useMemo(() => {
-    const map = new Map<string, Map<number, Score>>();
-    for (const score of scores) {
-      let byQuestion = map.get(score.teamId);
-      if (!byQuestion) {
-        byQuestion = new Map<number, Score>();
-        map.set(score.teamId, byQuestion);
-      }
-      const existing = byQuestion.get(score.questionNumber);
-      if (!existing || (score.updatedAt ?? '') > (existing.updatedAt ?? '')) {
-        byQuestion.set(score.questionNumber, score);
-      }
-    }
-    return map;
-  }, [scores]);
+  const scoreMap = useMemo(() => buildScoreMap(scores), [scores]);
   useEffect(() => {
     scoreMapRef.current = scoreMap;
   }, [scoreMap]);
@@ -188,7 +172,13 @@ export default function AdminScoresPage({ params }: Props) {
           setScoresSynced(true);
           if (!healedRef.current) {
             healedRef.current = true;
-            healDuplicates(items);
+            void healDuplicates(items).then(({ failedIds }) => {
+              if (failedIds.length > 0) {
+                setError(
+                  `Failed to clean up ${failedIds.length} duplicate score record(s). Please refresh and try again.`
+                );
+              }
+            });
           }
         }
       },
@@ -334,6 +324,10 @@ export default function AdminScoresPage({ params }: Props) {
   const saveScore = useCallback(
     async (teamId: string, questionNumber: number, points: number) => {
       setError(null);
+      if (!isValidPoints(points)) {
+        setError('Invalid score value.');
+        return;
+      }
       const existing = scoreMapRef.current.get(teamId)?.get(questionNumber) ?? null;
       const id = existing?.id ?? scoreId(teamId, questionNumber);
       const now = new Date().toISOString();
@@ -355,7 +349,11 @@ export default function AdminScoresPage({ params }: Props) {
 
       try {
         if (existing) {
-          await client.models.Score.update({ id, points }, { authMode: 'userPool' });
+          const { errors } = await client.models.Score.update(
+            { id, points },
+            { authMode: 'userPool' }
+          );
+          if (errors?.length) throw new Error(errors[0].message);
         } else {
           const { errors } = await client.models.Score.create(
             {
@@ -369,7 +367,15 @@ export default function AdminScoresPage({ params }: Props) {
             { authMode: 'userPool' }
           );
           if (errors?.length) {
-            await client.models.Score.update({ id, points }, { authMode: 'userPool' });
+            // Deterministic id already exists (race with another write) —
+            // fall back to an update. This fallback's own errors must be
+            // checked too, or a non-collision failure here would silently
+            // leave the optimistic UI showing a score that was never saved.
+            const fallback = await client.models.Score.update(
+              { id, points },
+              { authMode: 'userPool' }
+            );
+            if (fallback.errors?.length) throw new Error(fallback.errors[0].message);
           }
         }
       } catch {
@@ -405,30 +411,12 @@ export default function AdminScoresPage({ params }: Props) {
   }, []);
 
   const handleExport = useCallback(() => {
-    const questionNumbers = Array.from({ length: maxQuestionReached }, (_, i) => i + 1);
-    const header = ['Team', 'Type', ...questionNumbers.map((q) => `Q${q}`), 'Total'];
-    const rows = sortedTeams.map((team) => {
-      const byQuestion = scoreMap.get(team.id);
-      const typeLabel =
-        team.groupType && team.groupType in GROUP_LABELS
-          ? GROUP_LABELS[team.groupType as GroupType]
-          : '';
-      let total = 0;
-      const questionCells = questionNumbers.map((q) => {
-        const s = byQuestion?.get(q);
-        if (s !== undefined) {
-          total += s.points;
-          return String(s.points);
-        }
-        return '';
-      });
-      return [team.name, typeLabel, ...questionCells, String(total)];
-    });
-    const csvLines = [header, ...rows]
-      .map((fields) => fields.map(escapeCsvField).join(','))
-      .join('\n');
-    const filename = `bible-bowl-scores-${localTimestamp(new Date())}.csv`;
-    downloadCsv(filename, csvLines);
+    const groupLabel = (team: Team) =>
+      team.groupType && team.groupType in GROUP_LABELS
+        ? GROUP_LABELS[team.groupType as GroupType]
+        : '';
+    const csvLines = buildScoresCsv(sortedTeams, scoreMap, maxQuestionReached, groupLabel);
+    downloadCsv(scoresCsvFilename(new Date()), csvLines);
   }, [maxQuestionReached, sortedTeams, scoreMap]);
 
   return (

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { parseBulkTeams, type GroupType } from '@/app/lib/constants';
+import { bulkSubmitLabel } from '@/app/lib/ui';
 import GroupPill from '@/app/components/GroupPill';
 import Spinner from '@/app/components/Spinner';
 
@@ -39,12 +40,7 @@ export default function BulkAddTeamsModal({ onSubmit, onClose }: BulkAddTeamsMod
     }
   }
 
-  const submitLabel =
-    parsed.length === 0
-      ? 'Add teams'
-      : validRows.length === parsed.length
-        ? `Add ${validRows.length} team${validRows.length === 1 ? '' : 's'}`
-        : `Add ${validRows.length} of ${parsed.length} teams`;
+  const submitLabel = bulkSubmitLabel(parsed.length, validRows.length);
 
   return (
     <div

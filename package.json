@@ -11,7 +11,10 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\" --ignore-path .prettierignore",
     "seed:admin": "tsx scripts/seed-admin.ts",
     "typecheck": "tsc --noEmit",
-    "sandbox": "NODE_OPTIONS=--no-experimental-webstorage npx ampx sandbox"
+    "sandbox": "NODE_OPTIONS=--no-experimental-webstorage npx ampx sandbox",
+    "test": "NODE_OPTIONS=--no-experimental-webstorage vitest run",
+    "test:watch": "NODE_OPTIONS=--no-experimental-webstorage vitest",
+    "test:coverage": "NODE_OPTIONS=--no-experimental-webstorage vitest run --coverage"
   },
   "dependencies": {
     "@aws-amplify/adapter-nextjs": "^1.7.3",
@@ -21,6 +24,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "aws-amplify": "^6.18.0",
+    "aws-jwt-verify": "^5.2.1",
     "next": "16.2.9",
     "qrcode.react": "^4.2.0",
     "react": "19.2.4",
@@ -33,17 +37,25 @@
     "@aws-amplify/backend": "^1.23.0",
     "@aws-amplify/backend-cli": "^1.8.3",
     "@tailwindcss/postcss": "^4",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.0.5",
     "aws-cdk-lib": "^2.244.0",
     "constructs": "^10.6.0",
     "esbuild": "^0.28.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
+    "jsdom": "^29.1.1",
     "prettier": "^3.8.4",
     "tailwindcss": "^4",
     "tsx": "^4.22.4",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^4.1.10"
   }
 }

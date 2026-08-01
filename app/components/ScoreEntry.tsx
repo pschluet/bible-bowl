@@ -44,7 +44,12 @@ export default function ScoreEntry({ team, currentQuestion, existingScore }: Sco
       const data = (await res.json()) as { error?: string };
       if (res.status === 409) {
         // A record already exists for this question (e.g. admin already scored it,
-        // or a duplicate submit race). Treat it as already-scored.
+        // or a duplicate submit race). Treat it as already-scored and switch to the
+        // confirmation state immediately — otherwise the button grid stays enabled
+        // and tappable until the live `existingScore` subscription catches up,
+        // letting the scorekeeper generate repeated 409s in the meantime. The live
+        // subscription will resync this to the true stored value shortly after.
+        setSubmittedScore(points);
         setError('This question has already been scored.');
       } else if (!res.ok) {
         setError(
