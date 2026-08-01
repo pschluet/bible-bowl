@@ -29,7 +29,7 @@ export const scoreId = (teamId: string, questionNumber: number) => `${teamId}#${
  * Reserved URL segments that must not be used as game slugs, since they
  * correspond to top-level app routes.
  */
-const RESERVED_SLUGS = new Set(['login', 'scan', 'scorekeeper', 'admin', 'api', 'g']);
+export const RESERVED_SLUGS = new Set(['login', 'scan', 'scorekeeper', 'admin', 'api', 'g']);
 
 /**
  * Normalize a raw slug input: lowercase, replace spaces with hyphens,

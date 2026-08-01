@@ -7,7 +7,7 @@ A real-time scoring app for Bible Bowl competitions, built with Next.js and AWS 
 The app serves three audiences:
 
 - **Viewers** — anyone can watch the live leaderboard at `/` without logging in.
-- **Scorekeepers** — sign in, claim a team, and enter scores question-by-question at `/scorekeeper`.
+- **Scorekeepers** — scan a QR code to sign in automatically (no password), then enter scores question-by-question at `/scorekeeper`.
 - **Admins** — manage teams, users, and the game itself at `/admin`.
 
 ## Tech Stack
@@ -62,16 +62,18 @@ After the sandbox is running (or after your first deploy), create an admin and s
 
 2. Log in at `/login` and set a permanent password.
 
-3. Go to `/admin/teams` to add the competing church teams.
+3. Go to `/admin/games` to create a game (title + game code).
 
-4. Go to `/admin/scores` to initialize the game.
+4. Go to `/admin/games/[slug]/teams` to add the competing church teams.
+
+5. Go to `/admin/games/[slug]/scores` to initialize the game.
 
 ## User Roles
 
 - **SuperAdmin** — created via `npm run seed:admin -- your@email.com --super`. Can manage all games and create/delete admin users.
 - **Admin** — created via the `seed:admin` script (without `--super`) or in-app at `/admin/users`. Has full access under `/admin`.
-- **Scorekeeper** — can self-register at `/login` (sign up), then claim an unclaimed team at `/scorekeeper`. Claiming is first-come-first-served. Admins can also pre-create scorekeepers via `/admin/users` and assign them a team.
-- **Viewer** — no login required. The live leaderboard is at `/`.
+- **Scorekeeper** — onboarded via QR code, not sign-up. From `/admin/games/[slug]/users`, an admin generates one QR code per team; scanning it at `/scan?token=...` creates (or reuses) a Cognito account bound to that team and signs the scorekeeper in automatically, with no password to remember. Sign-up is disabled on `/login` — there is no self-registration or team-claiming flow.
+- **Viewer** — no login required. The live leaderboard is at `/g/[slug]` for a specific game, or `/` for the list of games.
 
 ## Deployment (Amplify Console)
 

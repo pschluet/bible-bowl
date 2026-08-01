@@ -30,6 +30,7 @@ import {
 } from '@/app/lib/constants';
 import { subscribeLive } from '@/app/lib/liveQuery';
 import { mapWithConcurrency, withRetry } from '@/app/lib/concurrency';
+import { computeReorderUpdates, nextDisplayOrder } from '@/app/lib/teams';
 import Spinner from '@/app/components/Spinner';
 import BulkAddTeamsModal from '@/app/components/BulkAddTeamsModal';
 
@@ -243,7 +244,7 @@ export default function AdminTeamsPage({ params }: Props) {
     setAdding(true);
     setError(null);
     try {
-      const displayOrder = teams.reduce((m, t) => Math.max(m, t.displayOrder ?? -1), -1) + 1;
+      const displayOrder = nextDisplayOrder(teams);
       await client.models.Team.create(
         { name, gameId: slug, ownerId, groupType: newGroup, displayOrder },
         { authMode: 'userPool' }
@@ -257,7 +258,7 @@ export default function AdminTeamsPage({ params }: Props) {
   }
 
   async function handleBulkAdd(newTeams: { name: string; groupType: GroupType }[]) {
-    const startOrder = teams.reduce((m, t) => Math.max(m, t.displayOrder ?? -1), -1) + 1;
+    const startOrder = nextDisplayOrder(teams);
     await mapWithConcurrency(newTeams, 5, (t, idx) =>
       withRetry(() =>
         client.models.Team.create(
@@ -296,11 +297,39 @@ export default function AdminTeamsPage({ params }: Props) {
     }
   }
 
+  // Deleting a team also deletes its own Score rows first — Score rows are
+  // keyed by teamId and are NOT auto-cascaded when a Team is deleted, so
+  // leaving them behind would orphan them (invisible in the UI, but real
+  // rows in the database). Mirrors handleDeleteAll below and the game-delete
+  // cascade in app/api/admin/games/route.ts.
   async function handleDelete(team: Team) {
     if (!confirm(`Delete "${team.name}"? This cannot be undone.`)) return;
     setError(null);
     setDeletingTeamId(team.id);
     try {
+      const scores = await listAll((opts) =>
+        client.models.Score.list({ ...opts, filter: { teamId: { eq: team.id } } })
+      );
+      const scoreFailures: string[] = [];
+      await mapWithConcurrency(scores, 20, async (s) => {
+        try {
+          await withRetry(async () => {
+            const { errors } = await client.models.Score.delete(
+              { id: s.id },
+              { authMode: 'userPool' }
+            );
+            if (errors && errors.length > 0) throw new Error(errors[0].message);
+          });
+        } catch (err) {
+          scoreFailures.push(s.id);
+          console.error(`Score deletion failed for ${s.id}:`, err);
+        }
+      });
+      if (scoreFailures.length > 0) {
+        setError(`Failed to delete ${scoreFailures.length} score(s). Please try again.`);
+        return;
+      }
+
       await client.models.Team.delete({ id: team.id }, { authMode: 'userPool' });
     } catch {
       setError('Failed to delete team.');
@@ -386,10 +415,8 @@ export default function AdminTeamsPage({ params }: Props) {
 
     setError(null);
     try {
-      const updates = reordered.flatMap((t, i) =>
-        t.displayOrder !== i
-          ? [client.models.Team.update({ id: t.id, displayOrder: i }, { authMode: 'userPool' })]
-          : []
+      const updates = computeReorderUpdates(reordered).map(({ id, displayOrder }) =>
+        client.models.Team.update({ id, displayOrder }, { authMode: 'userPool' })
       );
       await Promise.all(updates);
     } catch {

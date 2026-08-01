@@ -44,3 +44,41 @@ export function localTimestamp(date: Date): string {
   const seconds = pad(date.getSeconds());
   return `${year}-${month}-${day}_${hours}-${minutes}-${seconds}`;
 }
+
+/** Filename for a scores CSV export, timestamped in the local timezone. */
+export function scoresCsvFilename(date: Date): string {
+  return `bible-bowl-scores-${localTimestamp(date)}.csv`;
+}
+
+export interface CsvTeamLike {
+  id: string;
+  name: string;
+}
+
+/**
+ * Builds the scores CSV body: one column per question up to `maxQuestion`,
+ * a running total, and a blank cell for any unscored question.
+ */
+export function buildScoresCsv<T extends CsvTeamLike>(
+  teams: T[],
+  scoreMap: Map<string, Map<number, { points: number }>>,
+  maxQuestion: number,
+  groupLabel: (team: T) => string
+): string {
+  const questionNumbers = Array.from({ length: maxQuestion }, (_, i) => i + 1);
+  const header = ['Team', 'Type', ...questionNumbers.map((q) => `Q${q}`), 'Total'];
+  const rows = teams.map((team) => {
+    const byQuestion = scoreMap.get(team.id);
+    let total = 0;
+    const questionCells = questionNumbers.map((q) => {
+      const s = byQuestion?.get(q);
+      if (s !== undefined) {
+        total += s.points;
+        return String(s.points);
+      }
+      return '';
+    });
+    return [team.name, groupLabel(team), ...questionCells, String(total)];
+  });
+  return [header, ...rows].map((fields) => fields.map(escapeCsvField).join(',')).join('\n');
+}

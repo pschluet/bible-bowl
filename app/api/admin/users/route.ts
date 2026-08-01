@@ -183,8 +183,11 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: 'username is required' }, { status: 400 });
   }
 
-  // Prevent a super admin from deleting their own account
-  if (sub && sub === session.sub) {
+  // Prevent a super admin from deleting their own account. Checked by both
+  // sub and username: relying on sub alone left this bypassable by simply
+  // omitting it from the request body (the UI always sends both, but the
+  // route must not depend on that).
+  if ((sub && sub === session.sub) || username === session.email) {
     return NextResponse.json({ error: 'You cannot delete your own account.' }, { status: 400 });
   }
 

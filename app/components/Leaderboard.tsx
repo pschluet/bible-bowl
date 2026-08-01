@@ -3,6 +3,7 @@
 import { memo, useCallback, useState } from 'react';
 import GroupPill from '@/app/components/GroupPill';
 import { GROUP_TYPES, GROUP_LABELS } from '@/app/lib/constants';
+import { assignCompetitionRanks, groupTeamsByType, rankLabel } from '@/app/lib/leaderboard';
 
 export type ScoreHistoryEntry = { questionNumber: number; points: number };
 
@@ -20,13 +21,6 @@ type LeaderboardProps = {
   onFavorite: (id: string) => void;
   loading: boolean;
 };
-
-function rankLabel(rank: number): string {
-  if (rank === 1) return '🥇';
-  if (rank === 2) return '🥈';
-  if (rank === 3) return '🥉';
-  return String(rank);
-}
 
 /** Returns the most recent scored entry, or null if the team has no scores. */
 function latestEntry(history: ScoreHistoryEntry[]): ScoreHistoryEntry | null {
@@ -243,11 +237,11 @@ function GroupSection({
           isGroupExpanded ? ' lg:max-h-[32rem] lg:overflow-y-auto' : ''
         }`}
       >
-        {teams.map((team, i) => (
+        {assignCompetitionRanks(teams).map(({ team, rank }, i) => (
           <TeamRow
             key={team.id}
             team={team}
-            rank={i + 1}
+            rank={rank}
             isFavorite={favoriteTeamIds.has(team.id)}
             onFavorite={onFavorite}
             isExpanded={expandedIds.has(team.id)}
@@ -337,29 +331,21 @@ export default function Leaderboard({
   }
 
   // Partition teams into groups (already sorted by total desc from page.tsx)
-  const byGroup = new Map<string, LeaderboardTeam[]>();
-  for (const g of GROUP_TYPES) byGroup.set(g, []);
-  byGroup.set('Other', []);
-  for (const team of teams) {
-    const key =
-      team.groupType && GROUP_TYPES.includes(team.groupType as (typeof GROUP_TYPES)[number])
-        ? team.groupType
-        : 'Other';
-    byGroup.get(key)!.push(team);
-  }
+  const byGroup = groupTeamsByType(teams);
 
   // Only the group types with at least one team get a column, so desktop can
   // center a narrower set of columns instead of leaving empty grid tracks.
   const activeGroups = GROUP_TYPES.filter((g) => (byGroup.get(g)?.length ?? 0) > 0);
 
-  // Find all favorited teams across all groups with their within-group ranks, in group display order
+  // Find all favorited teams across all groups with their within-group
+  // (competition) ranks, in group display order.
   const favorites: { team: LeaderboardTeam; rank: number }[] = [];
   if (favoriteTeamIds.size) {
-    for (const g of [...GROUP_TYPES, 'Other']) {
+    for (const g of [...GROUP_TYPES, 'Other'] as const) {
       const groupTeams = byGroup.get(g) ?? [];
-      groupTeams.forEach((t, idx) => {
-        if (favoriteTeamIds.has(t.id)) favorites.push({ team: t, rank: idx + 1 });
-      });
+      for (const { team, rank } of assignCompetitionRanks(groupTeams)) {
+        if (favoriteTeamIds.has(team.id)) favorites.push({ team, rank });
+      }
     }
   }
 

@@ -4,6 +4,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Schema } from '@/amplify/data/resource';
 import GroupPill from '@/app/components/GroupPill';
 import ScoreEditPopover from '@/app/components/ScoreEditPopover';
+import { teamTotal } from '@/app/lib/scores';
 
 type Team = Schema['Team']['type'];
 type Score = Schema['Score']['type'];
@@ -24,13 +25,6 @@ interface ScoreGridProps {
   onSelectPrev: () => void;
   onEnterScore: (teamId: string, points: number) => void;
   recentEntry: { teamId: string; points: number } | null;
-}
-
-function teamTotal(byQuestion: Map<number, Score> | undefined): number {
-  if (!byQuestion) return 0;
-  let total = 0;
-  for (const score of byQuestion.values()) total += score.points;
-  return total;
 }
 
 /**

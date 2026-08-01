@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { POINT_OPTIONS } from '@/app/lib/constants';
+import { computePopoverPosition } from '@/app/lib/ui';
 import GroupPill from '@/app/components/GroupPill';
 
 interface ScoreEditPopoverProps {
@@ -38,25 +39,14 @@ export default function ScoreEditPopover({
   const reposition = useCallback(() => {
     const el = panelRef.current;
     if (!el) return;
-    const { width: pw, height: ph } = el.getBoundingClientRect();
+    const panelRect = el.getBoundingClientRect();
     const anchor = anchorEl.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-
-    // Vertical: appear below; flip above if it would overflow the bottom
-    let top = anchor.bottom + 6;
-    if (top + ph + VIEWPORT_PAD > vh) {
-      top = anchor.top - ph - 6;
-    }
-    top = Math.max(VIEWPORT_PAD, top);
-
-    // Horizontal: left-align with anchor; fall back to right-align; then hard clamp
-    let left = anchor.left;
-    if (left + pw + VIEWPORT_PAD > vw) {
-      left = anchor.right - pw;
-    }
-    left = Math.max(VIEWPORT_PAD, Math.min(left, vw - pw - VIEWPORT_PAD));
-
+    const { top, left } = computePopoverPosition({
+      panel: { width: panelRect.width, height: panelRect.height },
+      anchor,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      pad: VIEWPORT_PAD,
+    });
     setStyle({ position: 'fixed', top, left, visibility: 'visible' });
   }, [anchorEl]);
 

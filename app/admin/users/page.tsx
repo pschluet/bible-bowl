@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getCurrentUser } from 'aws-amplify/auth';
 import { SCOREKEEPER_EMAIL_DOMAIN } from '@/app/lib/cognito';
+import { isSyntheticScorekeeper, roleLabel } from '@/app/lib/users';
 import Spinner from '@/app/components/Spinner';
 
 interface CognitoUser {
@@ -11,11 +12,6 @@ interface CognitoUser {
   sub: string;
   status: string;
   groups: string[];
-}
-
-/** True for QR-onboarded scorekeeper users (synthetic username pattern). */
-function isSyntheticScorekeeper(user: CognitoUser): boolean {
-  return user.email.endsWith(`@${SCOREKEEPER_EMAIL_DOMAIN}`);
 }
 
 export default function SuperAdminUsersPage() {
@@ -190,9 +186,8 @@ export default function SuperAdminUsersPage() {
         ) : (
           <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
             {users.map((user) => {
-              const synthetic = isSyntheticScorekeeper(user);
-              const isSuperAdmin = user.groups.includes('SuperAdmins');
-              const isAdmin = user.groups.includes('Admins') || isSuperAdmin;
+              const synthetic = isSyntheticScorekeeper(user.email, SCOREKEEPER_EMAIL_DOMAIN);
+              const label = roleLabel(user, SCOREKEEPER_EMAIL_DOMAIN);
               const isSelf = user.sub === currentSub;
               const confirming = deleteConfirmUser === user.username;
               const deleting = deletingUser === user.username;
@@ -205,21 +200,17 @@ export default function SuperAdminUsersPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="break-words font-medium text-gray-900">{user.email}</p>
-                      {isSuperAdmin ? (
+                      {label === 'Super Admin' ? (
                         <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-semibold text-purple-700">
-                          Super Admin
+                          {label}
                         </span>
-                      ) : isAdmin ? (
+                      ) : label === 'Admin' ? (
                         <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">
-                          Admin
-                        </span>
-                      ) : synthetic ? (
-                        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-500">
-                          QR Scorekeeper
+                          {label}
                         </span>
                       ) : (
                         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-500">
-                          Scorekeeper
+                          {label}
                         </span>
                       )}
                     </div>

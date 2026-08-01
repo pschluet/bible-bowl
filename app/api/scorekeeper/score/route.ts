@@ -25,6 +25,7 @@ import outputs from '@/amplify_outputs.json';
 import type { Schema } from '@/amplify/data/resource';
 import { getServerSession } from '@/app/lib/auth';
 import { scoreId as makeScoreId } from '@/app/lib/constants';
+import { isValidPoints } from '@/app/lib/scores';
 
 export async function POST(request: Request) {
   const session = await getServerSession();
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  if (typeof points !== 'number' || ![0, 1, 2, 3].includes(points)) {
+  if (!isValidPoints(points)) {
     return NextResponse.json({ error: 'points must be 0, 1, 2, or 3' }, { status: 400 });
   }
 

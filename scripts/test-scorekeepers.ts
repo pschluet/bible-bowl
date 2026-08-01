@@ -26,6 +26,7 @@ import {
   CognitoIdentityProviderClient,
   InitiateAuthCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
+import { jsCookieEncodeName } from '../app/lib/cookie-names';
 
 // ── Environment config ────────────────────────────────────────────────────────
 
@@ -116,10 +117,6 @@ function httpRequest(
 //   node_modules/@aws-amplify/adapter-nextjs/dist/cjs/utils/cookie/ensureEncodedForJSCookie.js
 //   node_modules/@aws-amplify/adapter-nextjs/dist/cjs/utils/createCookieStorageAdapterFromNextServerContext.js
 //   node_modules/js-cookie/dist/js.cookie.js
-
-function jsCookieEncodeName(name: string): string {
-  return encodeURIComponent(name).replace(/%(2[346B]|5E|60|7C)/gi, decodeURIComponent);
-}
 
 function buildCookieHeader(
   clientId: string,
